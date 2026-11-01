@@ -10,6 +10,9 @@ pub enum EngineError {
     #[error("GStreamer operation failed: {0}")]
     GstreamerBool(#[from] gst::glib::BoolError),
 
+    #[error("state change failed: {0}")]
+    StateChange(#[from] gst::StateChangeError),
+
     #[error("no cameras found")]
     NoCamerasFound,
 
