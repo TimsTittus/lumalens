@@ -69,11 +69,11 @@ pub fn discover() -> Result<Vec<CameraInfo>, EngineError> {
 
         let device_path = props
             .as_ref()
-            .and_then(|p| p.get::<String>("device.path").ok())
+            .and_then(|p| p.get::<String>("api.v4l2.path").ok())
             .or_else(|| {
                 props
                     .as_ref()
-                    .and_then(|p| p.get::<String>("object.serial").ok())
+                    .and_then(|p| p.get::<String>("device.path").ok())
             })
             .unwrap_or_else(|| name.clone());
 
