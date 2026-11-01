@@ -8,10 +8,16 @@ pub struct PreviewWidget {
     picture: gtk::Picture,
 }
 
-impl PreviewWidget {
-    pub fn new() -> Self {
+impl Default for PreviewWidget {
+    fn default() -> Self {
         Self {
             picture: gtk::Picture::new(),
         }
+    }
+}
+
+impl PreviewWidget {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
