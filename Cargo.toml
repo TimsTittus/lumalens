@@ -1,0 +1,20 @@
+[package]
+name = "lumalens"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+rust-version = "1.85"
+authors = ["Neer <neerdalal1234@gmail.com>"]
+
+[dependencies]
+gtk4 = "~0.9"
+libadwaita = "~0.7"
+gstreamer = "~0.23"
+gstreamer-video = "~0.23"
+gstreamer-app = "~0.23"
+gst-plugin-gtk4 = { version = "~0.13", features = ["wayland", "x11egl"] }
+serde = { version = "~1", features = ["derive"] }
+toml = "~0.8"
+thiserror = "~2"
+tracing = "~0.1"
+tracing-subscriber = { version = "~0.3", features = ["env-filter"] }

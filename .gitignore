@@ -18,4 +18,11 @@ Thumbs.db
 .env
 .env.*
 
-/docs
+# Build / packaging
+*.deb
+*.rpm
+*.pkg.tar.*
+*.flatpak
+
+# Logs
+*.log

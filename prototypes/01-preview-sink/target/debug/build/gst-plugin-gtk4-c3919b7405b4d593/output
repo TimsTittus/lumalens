@@ -1,0 +1,3 @@
+cargo:warning="wayland" feature is deprecated, use "waylandegl" instead
+cargo:rustc-env=COMMIT_ID=5e71c26
+cargo:rustc-env=BUILD_REL_DATE=2025-10-20

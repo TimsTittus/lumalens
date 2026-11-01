@@ -1,0 +1,12 @@
+/home/bruce_wayne/Projects/lumalens/prototypes/01-preview-sink/target/debug/deps/thiserror-8168bbe0c49ea7ce.d: /home/bruce_wayne/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/lib.rs /home/bruce_wayne/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/aserror.rs /home/bruce_wayne/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/display.rs /home/bruce_wayne/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/var.rs /home/bruce_wayne/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/private.rs /home/bruce_wayne/Projects/lumalens/prototypes/01-preview-sink/target/debug/build/thiserror-f8126dda51eabb7a/out/private.rs
+
+/home/bruce_wayne/Projects/lumalens/prototypes/01-preview-sink/target/debug/deps/libthiserror-8168bbe0c49ea7ce.rmeta: /home/bruce_wayne/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/lib.rs /home/bruce_wayne/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/aserror.rs /home/bruce_wayne/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/display.rs /home/bruce_wayne/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/var.rs /home/bruce_wayne/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/private.rs /home/bruce_wayne/Projects/lumalens/prototypes/01-preview-sink/target/debug/build/thiserror-f8126dda51eabb7a/out/private.rs
+
+/home/bruce_wayne/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/lib.rs:
+/home/bruce_wayne/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/aserror.rs:
+/home/bruce_wayne/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/display.rs:
+/home/bruce_wayne/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/var.rs:
+/home/bruce_wayne/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/private.rs:
+/home/bruce_wayne/Projects/lumalens/prototypes/01-preview-sink/target/debug/build/thiserror-f8126dda51eabb7a/out/private.rs:
+
+# env-dep:OUT_DIR=/home/bruce_wayne/Projects/lumalens/prototypes/01-preview-sink/target/debug/build/thiserror-f8126dda51eabb7a/out
