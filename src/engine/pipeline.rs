@@ -22,6 +22,12 @@ impl Pipeline {
             .build()
             .map_err(|e| EngineError::PipelineBuildFailed(format!("v4l2src: {e}")))?;
 
+        let raw_caps = gst::Caps::builder("video/x-raw").build();
+        let capsfilter = gst::ElementFactory::make("capsfilter")
+            .property("caps", &raw_caps)
+            .build()
+            .map_err(|e| EngineError::PipelineBuildFailed(format!("capsfilter: {e}")))?;
+
         let convert1 = gst::ElementFactory::make("videoconvert")
             .build()
             .map_err(|e| EngineError::PipelineBuildFailed(format!("videoconvert: {e}")))?;
@@ -50,8 +56,8 @@ impl Pipeline {
             .map_err(|e| EngineError::PipelineBuildFailed(format!("videoconvert: {e}")))?;
 
         let pipeline = gst::Pipeline::default();
-        pipeline.add_many([&src, &convert1, &balance, &tee, &queue, &convert2, sink])?;
-        gst::Element::link_many([&src, &convert1, &balance, &tee, &queue, &convert2, sink])?;
+        pipeline.add_many([&src, &capsfilter, &convert1, &balance, &tee, &queue, &convert2, sink])?;
+        gst::Element::link_many([&src, &capsfilter, &convert1, &balance, &tee, &queue, &convert2, sink])?;
 
         Ok(Self {
             inner: pipeline,
