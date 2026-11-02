@@ -12,7 +12,7 @@ supported.
 ## Reporting a vulnerability
 
 If you discover a security issue, please report it by emailing
-**<your-email@example.com>**.
+**<timstittus1@gmail.com>**.
 
 **Do not open a public issue for security vulnerabilities.**
 
