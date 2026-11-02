@@ -9,6 +9,7 @@ use tracing::{debug, warn};
 use super::errors::EngineError;
 
 /// Metadata for a discovered camera device.
+#[derive(Clone)]
 pub struct CameraInfo {
     pub id: String,
     pub name: String,

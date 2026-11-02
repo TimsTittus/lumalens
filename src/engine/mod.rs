@@ -5,4 +5,5 @@ pub mod commands;
 pub mod errors;
 pub mod events;
 pub mod pipeline;
+pub mod runtime;
 pub mod virtual_cam;
