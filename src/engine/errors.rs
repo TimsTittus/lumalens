@@ -18,4 +18,7 @@ pub enum EngineError {
 
     #[error("failed to build pipeline: {0}")]
     PipelineBuildFailed(String),
+
+    #[error("camera disconnected: {name}")]
+    CameraDisconnected { name: String },
 }

@@ -7,14 +7,16 @@
 //!   polls this with a `glib::timeout_add_local` source so that event handlers
 //!   can safely touch widgets without `Send` bounds.
 
-use std::sync::mpsc;
+use std::sync::{mpsc, Mutex};
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use gstreamer as gst;
-use tracing::error;
+use tracing::{debug, error, warn};
 
 use super::camera;
 use super::commands::EngineCommand;
+use super::errors::EngineError;
 use super::events::EngineEvent;
 use super::pipeline::Pipeline;
 
@@ -40,9 +42,10 @@ pub fn spawn(sink: gst::Element) -> (Engine, mpsc::Receiver<EngineEvent>) {
     let (cmd_tx, cmd_rx) = mpsc::sync_channel::<EngineCommand>(32);
     let (event_tx, event_rx) = mpsc::channel::<EngineEvent>();
 
+    let cmd_tx_clone = cmd_tx.clone();
     let handle = thread::Builder::new()
         .name("lumalens-engine".into())
-        .spawn(move || engine_loop(cmd_rx, event_tx, sink))
+        .spawn(move || engine_loop(cmd_rx, cmd_tx_clone, event_tx, sink))
         .expect("failed to spawn engine thread");
 
     let engine = Engine {
@@ -62,11 +65,19 @@ fn emit(tx: &mpsc::Sender<EngineEvent>, event: EngineEvent) {
 fn build_pipeline(
     device: &str,
     sink: &gst::Element,
+    cmd_tx: &mpsc::SyncSender<EngineCommand>,
     event_tx: &mpsc::Sender<EngineEvent>,
 ) -> Option<Pipeline> {
     match Pipeline::build(device, sink) {
-        Ok(pipe) => Some(pipe),
+        Ok(pipe) => {
+            let tx = Mutex::new(cmd_tx.clone());
+            pipe.install_bus_watch(move |err| {
+                let _ = tx.lock().unwrap().try_send(EngineCommand::BusError(err));
+            });
+            Some(pipe)
+        }
         Err(e) => {
+            warn!("failed to build pipeline: {e}");
             emit(event_tx, EngineEvent::Error(e.to_string()));
             None
         }
@@ -75,19 +86,37 @@ fn build_pipeline(
 
 fn engine_loop(
     cmd_rx: mpsc::Receiver<EngineCommand>,
+    cmd_tx: mpsc::SyncSender<EngineCommand>,
     event_tx: mpsc::Sender<EngineEvent>,
     sink: gst::Element,
 ) {
     let mut pipeline: Option<Pipeline> = None;
     let mut stashed: Option<EngineCommand> = None;
 
+    let mut last_camera_count: usize = 0;
+
     loop {
+        let timeout = if pipeline.is_none() {
+            Duration::from_secs(2)
+        } else {
+            Duration::from_secs(5)
+        };
+
         let cmd = if let Some(cmd) = stashed.take() {
             cmd
         } else {
-            match cmd_rx.recv() {
+            match cmd_rx.recv_timeout(timeout) {
                 Ok(cmd) => cmd,
-                Err(_) => break,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if pipeline.is_none() {
+                        try_auto_discover(&sink, &cmd_tx, &event_tx, &mut pipeline,
+                                          &mut last_camera_count);
+                    } else {
+                        refresh_camera_list(&event_tx, &mut last_camera_count);
+                    }
+                    continue;
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
         };
 
@@ -98,10 +127,12 @@ fn engine_loop(
                         Ok(cameras) => {
                             let device = cameras[0].device_path.clone();
                             emit(&event_tx, EngineEvent::CamerasDiscovered(cameras));
-                            pipeline = build_pipeline(&device, &sink, &event_tx);
+                            pipeline = build_pipeline(&device, &sink, &cmd_tx, &event_tx);
                         }
                         Err(e) => {
+                            warn!("camera discovery failed: {e}");
                             emit(&event_tx, EngineEvent::Error(e.to_string()));
+                            emit(&event_tx, EngineEvent::CamerasDiscovered(vec![]));
                             continue;
                         }
                     }
@@ -109,7 +140,10 @@ fn engine_loop(
                 if let Some(ref pipe) = pipeline {
                     match pipe.start() {
                         Ok(()) => emit(&event_tx, EngineEvent::Started),
-                        Err(e) => emit(&event_tx, EngineEvent::Error(e.to_string())),
+                        Err(e) => {
+                            warn!("pipeline start failed: {e}");
+                            emit(&event_tx, EngineEvent::Error(e.to_string()));
+                        }
                     }
                 }
             }
@@ -118,7 +152,10 @@ fn engine_loop(
                 if let Some(ref pipe) = pipeline {
                     match pipe.stop() {
                         Ok(()) => emit(&event_tx, EngineEvent::Stopped),
-                        Err(e) => emit(&event_tx, EngineEvent::Error(e.to_string())),
+                        Err(e) => {
+                            warn!("pipeline stop failed: {e}");
+                            emit(&event_tx, EngineEvent::Error(e.to_string()));
+                        }
                     }
                 }
             }
@@ -129,11 +166,14 @@ fn engine_loop(
                 }
                 pipeline = None;
 
-                pipeline = build_pipeline(&device_path, &sink, &event_tx);
+                pipeline = build_pipeline(&device_path, &sink, &cmd_tx, &event_tx);
                 if let Some(ref pipe) = pipeline {
                     match pipe.start() {
                         Ok(()) => emit(&event_tx, EngineEvent::Started),
-                        Err(e) => emit(&event_tx, EngineEvent::Error(e.to_string())),
+                        Err(e) => {
+                            warn!("pipeline start failed after camera switch: {e}");
+                            emit(&event_tx, EngineEvent::Error(e.to_string()));
+                        }
                     }
                 }
             }
@@ -159,10 +199,12 @@ fn engine_loop(
                         match super::virtual_cam::find_device() {
                             Some(device) => {
                                 if let Err(e) = pipe.enable_virtual_camera(true, &device) {
+                                    warn!("failed to enable virtual camera: {e}");
                                     emit(&event_tx, EngineEvent::Error(e.to_string()));
                                 }
                             }
                             None => {
+                                warn!("virtual camera device not found");
                                 emit(
                                     &event_tx,
                                     EngineEvent::Error(
@@ -173,7 +215,49 @@ fn engine_loop(
                             }
                         }
                     } else if let Err(e) = pipe.enable_virtual_camera(false, "") {
+                        warn!("failed to disable virtual camera: {e}");
                         emit(&event_tx, EngineEvent::Error(e.to_string()));
+                    }
+                }
+            }
+
+            EngineCommand::BusError(err) => {
+                if pipeline.is_none() {
+                    continue;
+                }
+
+                if let Some(ref pipe) = pipeline {
+                    pipe.release_sink(&sink);
+                }
+                pipeline = None;
+
+                // Drain stale BusError commands queued by the old pipeline's
+                // sync handler before we attempt re-discovery.
+                loop {
+                    match cmd_rx.try_recv() {
+                        Ok(EngineCommand::BusError(_)) => continue,
+                        Ok(other) => {
+                            stashed = Some(other);
+                            break;
+                        }
+                        Err(_) => break,
+                    }
+                }
+
+                last_camera_count = 0;
+
+                match err {
+                    EngineError::CameraDisconnected { ref name } => {
+                        warn!("camera disconnected: {name}");
+                        emit(
+                            &event_tx,
+                            EngineEvent::Error(format!("Camera disconnected: {name}")),
+                        );
+                        emit(&event_tx, EngineEvent::CamerasDiscovered(vec![]));
+                    }
+                    other => {
+                        warn!("pipeline error: {other}");
+                        emit(&event_tx, EngineEvent::Error(other.to_string()));
                     }
                 }
             }
@@ -184,6 +268,75 @@ fn engine_loop(
                 }
                 break;
             }
+        }
+    }
+}
+
+fn try_auto_discover(
+    sink: &gst::Element,
+    cmd_tx: &mpsc::SyncSender<EngineCommand>,
+    event_tx: &mpsc::Sender<EngineEvent>,
+    pipeline: &mut Option<Pipeline>,
+    last_camera_count: &mut usize,
+) {
+    debug!("polling for cameras…");
+    let cameras = match camera::discover() {
+        Ok(c) if !c.is_empty() => c,
+        Ok(_) => {
+            debug!("no cameras found, will retry");
+            return;
+        }
+        Err(e) => {
+            debug!("discovery failed: {e}");
+            return;
+        }
+    };
+
+    let device = cameras[0].device_path.clone();
+
+    let pipe = match Pipeline::build(&device, sink) {
+        Ok(p) => p,
+        Err(e) => {
+            warn!("auto-discover: pipeline build failed: {e}");
+            return;
+        }
+    };
+
+    let tx = Mutex::new(cmd_tx.clone());
+    pipe.install_bus_watch(move |err| {
+        let _ = tx.lock().unwrap().try_send(EngineCommand::BusError(err));
+    });
+
+    match pipe.start() {
+        Ok(()) => {
+            *last_camera_count = cameras.len();
+            *pipeline = Some(pipe);
+            emit(event_tx, EngineEvent::CamerasDiscovered(cameras));
+            emit(event_tx, EngineEvent::Started);
+        }
+        Err(e) => {
+            warn!("auto-discover: start failed (will retry): {e}");
+            pipe.release_sink(sink);
+        }
+    }
+}
+
+/// Re-scan cameras while a pipeline is already running and update the UI
+/// dropdown if the set of available cameras changed.
+fn refresh_camera_list(
+    event_tx: &mpsc::Sender<EngineEvent>,
+    last_camera_count: &mut usize,
+) {
+    let count = match camera::discover() {
+        Ok(c) => c.len(),
+        Err(_) => 0,
+    };
+
+    if count != *last_camera_count {
+        *last_camera_count = count;
+        match camera::discover() {
+            Ok(cameras) => emit(event_tx, EngineEvent::CamerasDiscovered(cameras)),
+            Err(_) => emit(event_tx, EngineEvent::CamerasDiscovered(vec![])),
         }
     }
 }

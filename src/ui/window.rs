@@ -10,7 +10,7 @@ use gtk4::glib;
 use gtk4::prelude::*;
 use libadwaita as adw;
 use libadwaita::prelude::*;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::engine::commands::EngineCommand;
 use crate::engine::events::EngineEvent;
@@ -63,8 +63,19 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
     let header = adw::HeaderBar::new();
     header.pack_start(&sidebar_btn);
 
+    let status_page = adw::StatusPage::builder()
+        .icon_name("camera-disabled-symbolic")
+        .title("No Cameras")
+        .description("Connect a camera to get started")
+        .build();
+
+    let content_stack = gtk::Stack::new();
+    content_stack.add_named(preview.widget(), Some("preview"));
+    content_stack.add_named(&status_page, Some("no-cameras"));
+    content_stack.set_visible_child_name("preview");
+
     let toast_overlay = adw::ToastOverlay::new();
-    toast_overlay.set_child(Some(preview.widget()));
+    toast_overlay.set_child(Some(&content_stack));
 
     let toolbar_view = adw::ToolbarView::new();
     toolbar_view.add_top_bar(&header);
@@ -156,8 +167,11 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
                     glib::Propagation::Proceed
                 }
                 None => {
+                    warn!("virtual camera toggle: device not found");
                     let msg = crate::engine::virtual_cam::module_install_instructions();
-                    vcam_toast.add_toast(adw::Toast::new(msg));
+                    let t = adw::Toast::new(msg);
+                    t.set_timeout(5);
+                    vcam_toast.add_toast(t);
                     glib::Propagation::Stop
                 }
             }
@@ -174,11 +188,23 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
     let toast = toast_overlay.clone();
     let paths = Rc::clone(&device_paths);
     let suppress = Rc::clone(&suppress_camera_signal);
+    let stack = content_stack;
     glib::timeout_add_local(Duration::from_millis(16), move || {
         while let Ok(event) = event_rx.try_recv() {
             match event {
                 EngineEvent::CamerasDiscovered(cameras) => {
                     info!("discovered {} camera(s)", cameras.len());
+
+                    let old_selected = {
+                        let p = paths.borrow();
+                        let idx = camera_row.selected();
+                        if idx != gtk::INVALID_LIST_POSITION {
+                            p.get(idx as usize).cloned()
+                        } else {
+                            None
+                        }
+                    };
+
                     paths.replace(
                         cameras.iter().map(|c| c.device_path.clone()).collect(),
                     );
@@ -186,6 +212,20 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
                         cameras.iter().map(|c| c.name.as_str()).collect();
                     suppress.set(true);
                     camera_row.set_model(Some(&gtk::StringList::new(&names)));
+
+                    if cameras.is_empty() {
+                        stack.set_visible_child_name("no-cameras");
+                    } else {
+                        stack.set_visible_child_name("preview");
+                        let idx = old_selected
+                            .as_ref()
+                            .and_then(|old| {
+                                cameras.iter().position(|c| c.device_path == *old)
+                            })
+                            .unwrap_or(0);
+                        camera_row.set_selected(idx as u32);
+                    }
+
                     suppress.set(false);
                 }
                 EngineEvent::Started => {
@@ -195,8 +235,10 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
                     info!("engine stopped");
                 }
                 EngineEvent::Error(msg) => {
-                    error!("{msg}");
-                    toast.add_toast(adw::Toast::new(&msg));
+                    warn!("{msg}");
+                    let t = adw::Toast::new(&msg);
+                    t.set_timeout(5);
+                    toast.add_toast(t);
                 }
             }
         }

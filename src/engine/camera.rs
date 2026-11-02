@@ -18,11 +18,25 @@ pub struct CameraInfo {
 
 /// Discover available video capture devices.
 ///
-/// Uses `gst::DeviceMonitor` filtered to `Video/Source` with v4l2src as the
-/// preferred capture element (see ADR-0001). Deduplicates devices that expose
-/// multiple `/dev/video*` nodes for the same physical camera by keeping only
-/// those whose caps include `video/x-raw` or `image/jpeg`.
+/// Uses direct sysfs enumeration as the primary path (reliable across
+/// hot-plug cycles), then falls back to `gst::DeviceMonitor` when sysfs
+/// returns nothing.
 pub fn discover() -> Result<Vec<CameraInfo>, EngineError> {
+    let cameras = discover_v4l2_sysfs();
+    if !cameras.is_empty() {
+        return Ok(cameras);
+    }
+
+    debug!("sysfs found nothing, trying DeviceMonitor");
+    let cameras = discover_via_monitor();
+    if cameras.is_empty() {
+        return Err(EngineError::NoCamerasFound);
+    }
+
+    Ok(cameras)
+}
+
+fn discover_via_monitor() -> Vec<CameraInfo> {
     let monitor = gst::DeviceMonitor::new();
 
     let caps = gst::Caps::builder_full()
@@ -32,10 +46,10 @@ pub fn discover() -> Result<Vec<CameraInfo>, EngineError> {
 
     monitor.add_filter(Some("Video/Source"), Some(&caps));
 
-    monitor.start().map_err(|e| {
+    if let Err(e) = monitor.start() {
         warn!("failed to start device monitor: {e}");
-        EngineError::GstreamerBool(e)
-    })?;
+        return vec![];
+    }
 
     let devices = monitor.devices();
     monitor.stop();
@@ -87,11 +101,70 @@ pub fn discover() -> Result<Vec<CameraInfo>, EngineError> {
         });
     }
 
-    if cameras.is_empty() {
-        return Err(EngineError::NoCamerasFound);
+    cameras
+}
+
+/// Enumerate cameras via `/sys/class/video4linux` + sysfs attributes.
+///
+/// This avoids creating GStreamer elements during discovery, which can fail
+/// after a hot-plug cycle due to internal v4l2src state caching.
+fn discover_v4l2_sysfs() -> Vec<CameraInfo> {
+    let Ok(entries) = std::fs::read_dir("/sys/class/video4linux") else {
+        return vec![];
+    };
+
+    let mut dev_names: Vec<String> = entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().into_string().ok()?;
+            if name.starts_with("video") {
+                Some(name)
+            } else {
+                None
+            }
+        })
+        .collect();
+    dev_names.sort();
+
+    let mut seen_names = HashSet::new();
+    let mut cameras = Vec::new();
+
+    for dev_name in &dev_names {
+        let sysfs = format!("/sys/class/video4linux/{dev_name}");
+
+        if let Ok(index) = std::fs::read_to_string(format!("{sysfs}/index")) {
+            if index.trim() != "0" {
+                continue;
+            }
+        }
+
+        let name = match std::fs::read_to_string(format!("{sysfs}/name")) {
+            Ok(n) => n.trim().to_string(),
+            Err(_) => continue,
+        };
+
+        if name.to_ascii_lowercase().contains("lumalens") {
+            continue;
+        }
+
+        if !seen_names.insert(name.clone()) {
+            continue;
+        }
+
+        let device_path = format!("/dev/{dev_name}");
+        if !std::path::Path::new(&device_path).exists() {
+            continue;
+        }
+
+        debug!("sysfs: found camera: {name} ({device_path})");
+        cameras.push(CameraInfo {
+            id: device_path.clone(),
+            name,
+            device_path,
+        });
     }
 
-    Ok(cameras)
+    cameras
 }
 
 // Unit testing `discover()` is impractical because `gst::DeviceMonitor` talks

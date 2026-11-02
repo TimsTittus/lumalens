@@ -16,6 +16,7 @@ pub const VIRTUAL_CAM_FORMAT: &str = "YUY2";
 pub struct Pipeline {
     inner: gst::Pipeline,
     balance: gst::Element,
+    device_path: String,
     vcam_bin: Option<gst::Bin>,
     vcam_tee_pad: Option<gst::Pad>,
 }
@@ -68,6 +69,7 @@ impl Pipeline {
         Ok(Self {
             inner: pipeline,
             balance,
+            device_path: device_path.to_string(),
             vcam_bin: None,
             vcam_tee_pad: None,
         })
@@ -86,6 +88,27 @@ impl Pipeline {
     pub fn set_brightness(&self, value: f32) {
         let clamped = value.clamp(-1.0, 1.0);
         self.balance.set_property("brightness", clamped as f64);
+    }
+
+    /// Install a bus watch that forwards GStreamer errors to `on_error`.
+    ///
+    /// Resource errors from v4l2src (NotFound, Read, OpenRead, Close) are
+    /// mapped to [`EngineError::CameraDisconnected`]; everything else becomes
+    /// [`EngineError::PipelineBuildFailed`].
+    pub fn install_bus_watch(&self, on_error: impl Fn(EngineError) + Send + Sync + 'static) {
+        let bus = self.inner.bus().unwrap();
+        let device_path = self.device_path.clone();
+        bus.set_sync_handler(move |_bus, msg| {
+            if let gst::MessageView::Error(err) = msg.view() {
+                let gerror = err.error();
+                let src_name = msg
+                    .src()
+                    .map(|s| s.name().to_string())
+                    .unwrap_or_default();
+                on_error(classify_bus_error(&gerror, &src_name, &device_path));
+            }
+            gst::BusSyncReply::Pass
+        });
     }
 
     pub fn enable_virtual_camera(
@@ -205,6 +228,33 @@ impl Pipeline {
     /// new pipeline.
     pub fn release_sink(&self, sink: &gst::Element) {
         let _ = self.inner.set_state(gst::State::Null);
+        let _ = self
+            .inner
+            .state(Some(gst::ClockTime::from_seconds(3)));
         let _ = self.inner.remove(sink);
     }
+}
+
+fn classify_bus_error(
+    error: &gst::glib::Error,
+    src_name: &str,
+    device_path: &str,
+) -> EngineError {
+    if src_name == "src" {
+        if let Some(kind) = error.kind::<gst::ResourceError>() {
+            if matches!(
+                kind,
+                gst::ResourceError::NotFound
+                    | gst::ResourceError::Read
+                    | gst::ResourceError::OpenRead
+                    | gst::ResourceError::Close
+                    | gst::ResourceError::Busy
+            ) {
+                return EngineError::CameraDisconnected {
+                    name: device_path.to_string(),
+                };
+            }
+        }
+    }
+    EngineError::PipelineBuildFailed(error.to_string())
 }
