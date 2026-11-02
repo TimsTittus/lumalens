@@ -1,9 +1,4 @@
-#![allow(unused)]
-
 mod app;
-mod config;
-mod engine;
-mod prelude;
 mod ui;
 
 fn main() -> gtk4::glib::ExitCode {

@@ -1,6 +1,6 @@
 //! Events emitted by the engine back to the UI.
 
-use super::camera::CameraInfo;
+use lumalens_common::CameraInfo;
 
 /// An event the engine sends to the UI.
 pub enum EngineEvent {

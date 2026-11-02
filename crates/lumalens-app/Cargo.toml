@@ -1,0 +1,21 @@
+[package]
+name         = "lumalens-app"
+version.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+rust-version.workspace = true
+
+[[bin]]
+name = "lumalens"
+path = "src/main.rs"
+
+[dependencies]
+lumalens-common  = { workspace = true }
+lumalens-config  = { workspace = true }
+lumalens-engine  = { workspace = true }
+gtk4             = { workspace = true }
+libadwaita       = { workspace = true }
+gstreamer        = { workspace = true }
+gst-plugin-gtk4  = { workspace = true }
+tracing          = { workspace = true }
+tracing-subscriber = { workspace = true }

@@ -6,15 +6,16 @@ use std::time::Duration;
 
 use gstreamer as gst;
 use gtk4 as gtk;
+use gtk4::gdk;
 use gtk4::glib;
 use gtk4::prelude::*;
 use libadwaita as adw;
 use libadwaita::prelude::*;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
-use crate::engine::commands::EngineCommand;
-use crate::engine::events::EngineEvent;
-use crate::engine::runtime;
+use lumalens_engine::commands::EngineCommand;
+use lumalens_engine::events::EngineEvent;
+use lumalens_engine::runtime;
 
 use super::controls::Controls;
 use super::preview::PreviewWidget;
@@ -27,7 +28,14 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
         .name("sink")
         .build()
         .expect("gtk4paintablesink not available — is gst-plugin-gtk4 installed?");
-    let paintable = sink.property::<gtk4::gdk::Paintable>("paintable");
+
+    // `Pipeline::paintable()` returns `glib::Object` to keep `lumalens-engine`
+    // free of any `gdk` / `gtk4` compile-time dependency.  We perform the
+    // downcast here, in the app crate where `gdk` is already an explicit dep.
+    let paintable_obj: gst::glib::Object = sink.property("paintable");
+    let paintable = paintable_obj
+        .downcast::<gdk::Paintable>()
+        .expect("gtk4paintablesink paintable must implement gdk::Paintable");
     preview.set_paintable(&paintable);
 
     let (engine, event_rx) = runtime::spawn(sink);
@@ -159,7 +167,7 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
     let vcam_toast = toast_overlay.clone();
     controls.virtual_cam_switch.connect_state_set(move |_switch, state| {
         if state {
-            match crate::engine::virtual_cam::find_device() {
+            match lumalens_engine::virtual_cam::find_device() {
                 Some(_) => {
                     if let Some(ref e) = *eng.borrow() {
                         e.send(EngineCommand::EnableVirtualCamera(true));
@@ -168,7 +176,7 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
                 }
                 None => {
                     warn!("virtual camera toggle: device not found");
-                    let msg = crate::engine::virtual_cam::module_install_instructions();
+                    let msg = lumalens_engine::virtual_cam::module_install_instructions();
                     let t = adw::Toast::new(msg);
                     t.set_timeout(5);
                     vcam_toast.add_toast(t);
@@ -205,11 +213,8 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
                         }
                     };
 
-                    paths.replace(
-                        cameras.iter().map(|c| c.device_path.clone()).collect(),
-                    );
-                    let names: Vec<&str> =
-                        cameras.iter().map(|c| c.name.as_str()).collect();
+                    paths.replace(cameras.iter().map(|c| c.device_path.clone()).collect());
+                    let names: Vec<&str> = cameras.iter().map(|c| c.name.as_str()).collect();
                     suppress.set(true);
                     camera_row.set_model(Some(&gtk::StringList::new(&names)));
 
@@ -219,9 +224,7 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
                         stack.set_visible_child_name("preview");
                         let idx = old_selected
                             .as_ref()
-                            .and_then(|old| {
-                                cameras.iter().position(|c| c.device_path == *old)
-                            })
+                            .and_then(|old| cameras.iter().position(|c| c.device_path == *old))
                             .unwrap_or(0);
                         camera_row.set_selected(idx as u32);
                     }

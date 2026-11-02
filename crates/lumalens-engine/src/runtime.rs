@@ -14,11 +14,11 @@ use std::time::Duration;
 use gstreamer as gst;
 use tracing::{debug, error, warn};
 
-use super::camera;
-use super::commands::EngineCommand;
-use super::errors::EngineError;
-use super::events::EngineEvent;
-use super::pipeline::Pipeline;
+use crate::camera;
+use crate::commands::EngineCommand;
+use crate::errors::EngineError;
+use crate::events::EngineEvent;
+use crate::pipeline::Pipeline;
 
 pub struct Engine {
     cmd_tx: mpsc::SyncSender<EngineCommand>,
@@ -48,10 +48,7 @@ pub fn spawn(sink: gst::Element) -> (Engine, mpsc::Receiver<EngineEvent>) {
         .spawn(move || engine_loop(cmd_rx, cmd_tx_clone, event_tx, sink))
         .expect("failed to spawn engine thread");
 
-    let engine = Engine {
-        cmd_tx,
-        _thread: handle,
-    };
+    let engine = Engine { cmd_tx, _thread: handle };
 
     (engine, event_rx)
 }
@@ -92,7 +89,6 @@ fn engine_loop(
 ) {
     let mut pipeline: Option<Pipeline> = None;
     let mut stashed: Option<EngineCommand> = None;
-
     let mut last_camera_count: usize = 0;
 
     loop {
@@ -164,7 +160,6 @@ fn engine_loop(
                 if let Some(ref pipe) = pipeline {
                     pipe.release_sink(&sink);
                 }
-                pipeline = None;
 
                 pipeline = build_pipeline(&device_path, &sink, &cmd_tx, &event_tx);
                 if let Some(ref pipe) = pipeline {
@@ -196,7 +191,7 @@ fn engine_loop(
             EngineCommand::EnableVirtualCamera(enabled) => {
                 if let Some(ref mut pipe) = pipeline {
                     if enabled {
-                        match super::virtual_cam::find_device() {
+                        match crate::virtual_cam::find_device() {
                             Some(device) => {
                                 if let Err(e) = pipe.enable_virtual_camera(true, &device) {
                                     warn!("failed to enable virtual camera: {e}");
@@ -208,7 +203,7 @@ fn engine_loop(
                                 emit(
                                     &event_tx,
                                     EngineEvent::Error(
-                                        super::virtual_cam::module_install_instructions()
+                                        crate::virtual_cam::module_install_instructions()
                                             .to_string(),
                                     ),
                                 );

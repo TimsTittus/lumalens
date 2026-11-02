@@ -1,7 +1,7 @@
 //! Application entry point.
 
 use gtk4 as gtk;
-use gtk::prelude::*;
+use gtk4::prelude::*;
 use libadwaita as adw;
 
 use crate::ui;

@@ -1,6 +1,6 @@
 //! Commands sent from the UI to the engine.
 
-use super::errors::EngineError;
+use crate::errors::EngineError;
 
 /// A command the UI sends to the camera engine.
 pub enum EngineCommand {

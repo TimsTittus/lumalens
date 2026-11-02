@@ -6,15 +6,9 @@ use gstreamer as gst;
 use gst::prelude::*;
 use tracing::{debug, warn};
 
-use super::errors::EngineError;
+pub use lumalens_common::CameraInfo;
 
-/// Metadata for a discovered camera device.
-#[derive(Clone)]
-pub struct CameraInfo {
-    pub id: String,
-    pub name: String,
-    pub device_path: String,
-}
+use crate::errors::EngineError;
 
 /// Discover available video capture devices.
 ///
@@ -59,22 +53,13 @@ fn discover_via_monitor() -> Vec<CameraInfo> {
 
     for device in &devices {
         let name = device.display_name().to_string();
-
         let props = device.properties();
 
         let id = props
             .as_ref()
             .and_then(|p| p.get::<String>("device.path").ok())
-            .or_else(|| {
-                props
-                    .as_ref()
-                    .and_then(|p| p.get::<String>("device.serial").ok())
-            })
-            .or_else(|| {
-                props
-                    .as_ref()
-                    .and_then(|p| p.get::<String>("object.serial").ok())
-            })
+            .or_else(|| props.as_ref().and_then(|p| p.get::<String>("device.serial").ok()))
+            .or_else(|| props.as_ref().and_then(|p| p.get::<String>("object.serial").ok()))
             .unwrap_or_else(|| name.clone());
 
         if !seen_ids.insert(id.clone()) {
@@ -85,20 +70,11 @@ fn discover_via_monitor() -> Vec<CameraInfo> {
         let device_path = props
             .as_ref()
             .and_then(|p| p.get::<String>("api.v4l2.path").ok())
-            .or_else(|| {
-                props
-                    .as_ref()
-                    .and_then(|p| p.get::<String>("device.path").ok())
-            })
+            .or_else(|| props.as_ref().and_then(|p| p.get::<String>("device.path").ok()))
             .unwrap_or_else(|| name.clone());
 
         debug!("discovered camera: {name} (id={id}, path={device_path})");
-
-        cameras.push(CameraInfo {
-            id,
-            name,
-            device_path,
-        });
+        cameras.push(CameraInfo { id, name, device_path });
     }
 
     cameras
@@ -117,11 +93,7 @@ fn discover_v4l2_sysfs() -> Vec<CameraInfo> {
         .flatten()
         .filter_map(|e| {
             let name = e.file_name().into_string().ok()?;
-            if name.starts_with("video") {
-                Some(name)
-            } else {
-                None
-            }
+            if name.starts_with("video") { Some(name) } else { None }
         })
         .collect();
     dev_names.sort();
@@ -157,18 +129,8 @@ fn discover_v4l2_sysfs() -> Vec<CameraInfo> {
         }
 
         debug!("sysfs: found camera: {name} ({device_path})");
-        cameras.push(CameraInfo {
-            id: device_path.clone(),
-            name,
-            device_path,
-        });
+        cameras.push(CameraInfo { id: device_path.clone(), name, device_path });
     }
 
     cameras
 }
-
-// Unit testing `discover()` is impractical because `gst::DeviceMonitor` talks
-// directly to system device providers and GStreamer offers no way to inject
-// mock devices into the monitor. An integration test that requires real
-// hardware lives in `tests/camera_discovery.rs` behind the `live-hardware`
-// feature flag.

@@ -5,17 +5,23 @@ use std::sync::{Arc, Condvar, Mutex};
 use gstreamer as gst;
 use gstreamer::prelude::*;
 
-use super::errors::EngineError;
+use crate::errors::EngineError;
 
 pub const VIRTUAL_CAM_FORMAT: &str = "YUY2";
 
 /// Owns and drives the GStreamer pipeline for a camera session.
 ///
-/// The `gtk4paintablesink` element is created on the main thread (so its
-/// `Paintable` stays there) and lent to [`build`](Self::build) via reference.
+/// The `gtk4paintablesink` element is created on the GTK main thread and
+/// lent to [`build`](Self::build) via reference.  A cloned GStreamer
+/// reference is stored here so that [`paintable`](Self::paintable) can be
+/// called from within the engine crate without naming any GTK/GDK types.
 pub struct Pipeline {
     inner: gst::Pipeline,
     balance: gst::Element,
+    /// Cloned GStreamer ref to the sink, held for [`paintable()`](Self::paintable).
+    /// The engine thread owns the canonical reference; this clone is
+    /// reference-counted at the GStreamer level and costs no extra allocation.
+    sink_ref: gst::Element,
     device_path: String,
     vcam_bin: Option<gst::Bin>,
     vcam_tee_pad: Option<gst::Pad>,
@@ -69,6 +75,7 @@ impl Pipeline {
         Ok(Self {
             inner: pipeline,
             balance,
+            sink_ref: sink.clone(),
             device_path: device_path.to_string(),
             vcam_bin: None,
             vcam_tee_pad: None,
@@ -90,21 +97,28 @@ impl Pipeline {
         self.balance.set_property("brightness", clamped as f64);
     }
 
+    /// Returns the `gtk4paintablesink` paintable as an erased `glib::Object`.
+    ///
+    /// We return `glib::Object` rather than `gdk::Paintable` so that this
+    /// crate does not need a compile-time dependency on `gtk4` or `gdk`.
+    /// The caller (`lumalens-app`) performs the downcast after it has already
+    /// imported `gdk`.
+    pub fn paintable(&self) -> gst::glib::Object {
+        self.sink_ref.property("paintable")
+    }
+
     /// Install a bus watch that forwards GStreamer errors to `on_error`.
     ///
-    /// Resource errors from v4l2src (NotFound, Read, OpenRead, Close) are
-    /// mapped to [`EngineError::CameraDisconnected`]; everything else becomes
-    /// [`EngineError::PipelineBuildFailed`].
+    /// Resource errors from v4l2src (NotFound, Read, OpenRead, Close, Busy)
+    /// are mapped to [`EngineError::CameraDisconnected`]; everything else
+    /// becomes [`EngineError::PipelineBuildFailed`].
     pub fn install_bus_watch(&self, on_error: impl Fn(EngineError) + Send + Sync + 'static) {
         let bus = self.inner.bus().unwrap();
         let device_path = self.device_path.clone();
         bus.set_sync_handler(move |_bus, msg| {
             if let gst::MessageView::Error(err) = msg.view() {
                 let gerror = err.error();
-                let src_name = msg
-                    .src()
-                    .map(|s| s.name().to_string())
-                    .unwrap_or_default();
+                let src_name = msg.src().map(|s| s.name().to_string()).unwrap_or_default();
                 on_error(classify_bus_error(&gerror, &src_name, &device_path));
             }
             gst::BusSyncReply::Pass
@@ -133,9 +147,7 @@ impl Pipeline {
 
             let convert = gst::ElementFactory::make("videoconvert")
                 .build()
-                .map_err(|e| {
-                    EngineError::PipelineBuildFailed(format!("vcam videoconvert: {e}"))
-                })?;
+                .map_err(|e| EngineError::PipelineBuildFailed(format!("vcam videoconvert: {e}")))?;
 
             let caps = gst::Caps::builder("video/x-raw")
                 .field("format", VIRTUAL_CAM_FORMAT)
@@ -146,9 +158,7 @@ impl Pipeline {
             let capsfilter = gst::ElementFactory::make("capsfilter")
                 .property("caps", &caps)
                 .build()
-                .map_err(|e| {
-                    EngineError::PipelineBuildFailed(format!("vcam capsfilter: {e}"))
-                })?;
+                .map_err(|e| EngineError::PipelineBuildFailed(format!("vcam capsfilter: {e}")))?;
 
             let v4l2sink = gst::ElementFactory::make("v4l2sink")
                 .property("device", device_path)
@@ -228,9 +238,7 @@ impl Pipeline {
     /// new pipeline.
     pub fn release_sink(&self, sink: &gst::Element) {
         let _ = self.inner.set_state(gst::State::Null);
-        let _ = self
-            .inner
-            .state(Some(gst::ClockTime::from_seconds(3)));
+        let _ = self.inner.state(Some(gst::ClockTime::from_seconds(3)));
         let _ = self.inner.remove(sink);
     }
 }

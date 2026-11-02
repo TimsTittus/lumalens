@@ -29,38 +29,22 @@ impl Controls {
         brightness.set_increments(0.05, 0.1);
         brightness.set_value(0.0);
 
-        let brightness_row = adw::ActionRow::builder()
-            .title("Brightness")
-            .build();
+        let brightness_row = adw::ActionRow::builder().title("Brightness").build();
         brightness_row.add_suffix(&brightness);
 
-        let root = adw::PreferencesGroup::builder()
-            .title("Camera")
-            .build();
+        let root = adw::PreferencesGroup::builder().title("Camera").build();
         root.add(&camera_row);
         root.add(&brightness_row);
 
-        let virtual_cam_switch = gtk::Switch::builder()
-            .valign(gtk::Align::Center)
-            .build();
+        let virtual_cam_switch = gtk::Switch::builder().valign(gtk::Align::Center).build();
 
-        let vcam_row = adw::ActionRow::builder()
-            .title("Virtual Camera")
-            .build();
+        let vcam_row = adw::ActionRow::builder().title("Virtual Camera").build();
         vcam_row.add_suffix(&virtual_cam_switch);
         vcam_row.set_activatable_widget(Some(&virtual_cam_switch));
 
-        let output_group = adw::PreferencesGroup::builder()
-            .title("Output")
-            .build();
+        let output_group = adw::PreferencesGroup::builder().title("Output").build();
         output_group.add(&vcam_row);
 
-        Self {
-            root,
-            output_group,
-            camera_row,
-            brightness,
-            virtual_cam_switch,
-        }
+        Self { root, output_group, camera_row, brightness, virtual_cam_switch }
     }
 }
