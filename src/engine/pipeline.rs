@@ -1,9 +1,13 @@
 //! GStreamer pipeline management.
 
+use std::sync::{Arc, Condvar, Mutex};
+
 use gstreamer as gst;
 use gstreamer::prelude::*;
 
 use super::errors::EngineError;
+
+pub const VIRTUAL_CAM_FORMAT: &str = "YUY2";
 
 /// Owns and drives the GStreamer pipeline for a camera session.
 ///
@@ -12,6 +16,8 @@ use super::errors::EngineError;
 pub struct Pipeline {
     inner: gst::Pipeline,
     balance: gst::Element,
+    vcam_bin: Option<gst::Bin>,
+    vcam_tee_pad: Option<gst::Pad>,
 }
 
 impl Pipeline {
@@ -62,6 +68,8 @@ impl Pipeline {
         Ok(Self {
             inner: pipeline,
             balance,
+            vcam_bin: None,
+            vcam_tee_pad: None,
         })
     }
 
@@ -78,6 +86,119 @@ impl Pipeline {
     pub fn set_brightness(&self, value: f32) {
         let clamped = value.clamp(-1.0, 1.0);
         self.balance.set_property("brightness", clamped as f64);
+    }
+
+    pub fn enable_virtual_camera(
+        &mut self,
+        enabled: bool,
+        device_path: &str,
+    ) -> Result<(), EngineError> {
+        if enabled {
+            if self.vcam_bin.is_some() {
+                return Ok(());
+            }
+
+            let tee = self
+                .inner
+                .by_name("t")
+                .ok_or_else(|| EngineError::PipelineBuildFailed("tee not found".into()))?;
+
+            let queue = gst::ElementFactory::make("queue")
+                .property("max-size-buffers", 2u32)
+                .build()
+                .map_err(|e| EngineError::PipelineBuildFailed(format!("vcam queue: {e}")))?;
+
+            let convert = gst::ElementFactory::make("videoconvert")
+                .build()
+                .map_err(|e| {
+                    EngineError::PipelineBuildFailed(format!("vcam videoconvert: {e}"))
+                })?;
+
+            let caps = gst::Caps::builder("video/x-raw")
+                .field("format", VIRTUAL_CAM_FORMAT)
+                .field("width", 1280i32)
+                .field("height", 720i32)
+                .field("framerate", gst::Fraction::new(30, 1))
+                .build();
+            let capsfilter = gst::ElementFactory::make("capsfilter")
+                .property("caps", &caps)
+                .build()
+                .map_err(|e| {
+                    EngineError::PipelineBuildFailed(format!("vcam capsfilter: {e}"))
+                })?;
+
+            let v4l2sink = gst::ElementFactory::make("v4l2sink")
+                .property("device", device_path)
+                .property("sync", false)
+                .build()
+                .map_err(|e| EngineError::PipelineBuildFailed(format!("v4l2sink: {e}")))?;
+
+            let bin = gst::Bin::builder().name("vcam-bin").build();
+            bin.add_many([&queue, &convert, &capsfilter, &v4l2sink])?;
+            gst::Element::link_many([&queue, &convert, &capsfilter, &v4l2sink])?;
+
+            let queue_sink = queue.static_pad("sink").ok_or_else(|| {
+                EngineError::PipelineBuildFailed("queue sink pad missing".into())
+            })?;
+            let ghost = gst::GhostPad::with_target(&queue_sink)
+                .map_err(|e| EngineError::PipelineBuildFailed(format!("ghost pad: {e}")))?;
+            bin.add_pad(&ghost)?;
+
+            self.inner.add(&bin)?;
+
+            let tee_src = tee.request_pad_simple("src_%u").ok_or_else(|| {
+                EngineError::PipelineBuildFailed("tee pad request failed".into())
+            })?;
+            tee_src.link(&ghost).map_err(|e| {
+                EngineError::PipelineBuildFailed(format!("tee-vcam link: {e:?}"))
+            })?;
+
+            bin.sync_state_with_parent()?;
+
+            self.vcam_bin = Some(bin);
+            self.vcam_tee_pad = Some(tee_src);
+        } else {
+            let bin = match self.vcam_bin.take() {
+                Some(b) => b,
+                None => return Ok(()),
+            };
+            let tee_pad = match self.vcam_tee_pad.take() {
+                Some(p) => p,
+                None => return Ok(()),
+            };
+
+            // Dynamic pipeline removal using blocking pad probes.
+            // https://gstreamer.freedesktop.org/documentation/application-development/advanced/pipeline-manipulation.html#dynamically-changing-the-pipeline
+            let pipeline = self.inner.clone();
+            let done = Arc::new((Mutex::new(false), Condvar::new()));
+            let done_inner = Arc::clone(&done);
+
+            tee_pad.add_probe(gst::PadProbeType::BLOCK_DOWNSTREAM, move |pad, _info| {
+                if let Some(peer) = pad.peer() {
+                    let _ = pad.unlink(&peer);
+                }
+                bin.send_event(gst::event::Eos::new());
+                let _ = bin.set_state(gst::State::Null);
+                let _ = pipeline.remove(&bin);
+
+                let (lock, cvar) = &*done_inner;
+                *lock.lock().unwrap() = true;
+                cvar.notify_one();
+
+                gst::PadProbeReturn::Remove
+            });
+
+            let (lock, cvar) = &*done;
+            let mut finished = lock.lock().unwrap();
+            while !*finished {
+                finished = cvar.wait(finished).unwrap();
+            }
+
+            let tee = self.inner.by_name("t").unwrap();
+            tee.release_request_pad(&tee_pad);
+        }
+
+        Ok(())
     }
 
     /// Stop the pipeline and detach the shared sink so it can be reused in a

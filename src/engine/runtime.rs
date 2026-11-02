@@ -153,8 +153,29 @@ fn engine_loop(
                 }
             }
 
-            EngineCommand::EnableVirtualCamera(_) => {
-                // TODO
+            EngineCommand::EnableVirtualCamera(enabled) => {
+                if let Some(ref mut pipe) = pipeline {
+                    if enabled {
+                        match super::virtual_cam::find_device() {
+                            Some(device) => {
+                                if let Err(e) = pipe.enable_virtual_camera(true, &device) {
+                                    emit(&event_tx, EngineEvent::Error(e.to_string()));
+                                }
+                            }
+                            None => {
+                                emit(
+                                    &event_tx,
+                                    EngineEvent::Error(
+                                        super::virtual_cam::module_install_instructions()
+                                            .to_string(),
+                                    ),
+                                );
+                            }
+                        }
+                    } else if let Err(e) = pipe.enable_virtual_camera(false, "") {
+                        emit(&event_tx, EngineEvent::Error(e.to_string()));
+                    }
+                }
             }
 
             EngineCommand::Shutdown => {

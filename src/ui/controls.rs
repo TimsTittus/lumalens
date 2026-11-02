@@ -7,8 +7,10 @@ use libadwaita::prelude::*;
 
 pub struct Controls {
     pub root: adw::PreferencesGroup,
+    pub output_group: adw::PreferencesGroup,
     pub camera_row: adw::ComboRow,
     pub brightness: gtk::Scale,
+    pub virtual_cam_switch: gtk::Switch,
 }
 
 impl Controls {
@@ -38,10 +40,27 @@ impl Controls {
         root.add(&camera_row);
         root.add(&brightness_row);
 
+        let virtual_cam_switch = gtk::Switch::builder()
+            .valign(gtk::Align::Center)
+            .build();
+
+        let vcam_row = adw::ActionRow::builder()
+            .title("Virtual Camera")
+            .build();
+        vcam_row.add_suffix(&virtual_cam_switch);
+        vcam_row.set_activatable_widget(Some(&virtual_cam_switch));
+
+        let output_group = adw::PreferencesGroup::builder()
+            .title("Output")
+            .build();
+        output_group.add(&vcam_row);
+
         Self {
             root,
+            output_group,
             camera_row,
             brightness,
+            virtual_cam_switch,
         }
     }
 }

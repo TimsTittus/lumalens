@@ -39,12 +39,13 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
 
     // --- sidebar -----------------------------------------------------------
 
-    let sidebar_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    let sidebar_box = gtk::Box::new(gtk::Orientation::Vertical, 12);
     sidebar_box.set_margin_top(12);
     sidebar_box.set_margin_bottom(12);
     sidebar_box.set_margin_start(12);
     sidebar_box.set_margin_end(12);
     sidebar_box.append(&controls.root);
+    sidebar_box.append(&controls.output_group);
 
     let sidebar = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
@@ -139,6 +140,33 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
             }
         });
         debounce.borrow_mut().replace(id);
+    });
+
+    // --- virtual camera switch -----------------------------------------------
+
+    let eng = Rc::clone(&engine);
+    let vcam_toast = toast_overlay.clone();
+    controls.virtual_cam_switch.connect_state_set(move |_switch, state| {
+        if state {
+            match crate::engine::virtual_cam::find_device() {
+                Some(_) => {
+                    if let Some(ref e) = *eng.borrow() {
+                        e.send(EngineCommand::EnableVirtualCamera(true));
+                    }
+                    glib::Propagation::Proceed
+                }
+                None => {
+                    let msg = crate::engine::virtual_cam::module_install_instructions();
+                    vcam_toast.add_toast(adw::Toast::new(msg));
+                    glib::Propagation::Stop
+                }
+            }
+        } else {
+            if let Some(ref e) = *eng.borrow() {
+                e.send(EngineCommand::EnableVirtualCamera(false));
+            }
+            glib::Propagation::Proceed
+        }
     });
 
     // --- event polling ------------------------------------------------------
