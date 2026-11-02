@@ -2,8 +2,8 @@
 
 use std::collections::HashSet;
 
-use gstreamer as gst;
 use gst::prelude::*;
+use gstreamer as gst;
 use tracing::{debug, warn};
 
 pub use lumalens_common::CameraInfo;
@@ -58,8 +58,16 @@ fn discover_via_monitor() -> Vec<CameraInfo> {
         let id = props
             .as_ref()
             .and_then(|p| p.get::<String>("device.path").ok())
-            .or_else(|| props.as_ref().and_then(|p| p.get::<String>("device.serial").ok()))
-            .or_else(|| props.as_ref().and_then(|p| p.get::<String>("object.serial").ok()))
+            .or_else(|| {
+                props
+                    .as_ref()
+                    .and_then(|p| p.get::<String>("device.serial").ok())
+            })
+            .or_else(|| {
+                props
+                    .as_ref()
+                    .and_then(|p| p.get::<String>("object.serial").ok())
+            })
             .unwrap_or_else(|| name.clone());
 
         if !seen_ids.insert(id.clone()) {
@@ -70,11 +78,19 @@ fn discover_via_monitor() -> Vec<CameraInfo> {
         let device_path = props
             .as_ref()
             .and_then(|p| p.get::<String>("api.v4l2.path").ok())
-            .or_else(|| props.as_ref().and_then(|p| p.get::<String>("device.path").ok()))
+            .or_else(|| {
+                props
+                    .as_ref()
+                    .and_then(|p| p.get::<String>("device.path").ok())
+            })
             .unwrap_or_else(|| name.clone());
 
         debug!("discovered camera: {name} (id={id}, path={device_path})");
-        cameras.push(CameraInfo { id, name, device_path });
+        cameras.push(CameraInfo {
+            id,
+            name,
+            device_path,
+        });
     }
 
     cameras
@@ -93,7 +109,11 @@ fn discover_v4l2_sysfs() -> Vec<CameraInfo> {
         .flatten()
         .filter_map(|e| {
             let name = e.file_name().into_string().ok()?;
-            if name.starts_with("video") { Some(name) } else { None }
+            if name.starts_with("video") {
+                Some(name)
+            } else {
+                None
+            }
         })
         .collect();
     dev_names.sort();
@@ -129,7 +149,11 @@ fn discover_v4l2_sysfs() -> Vec<CameraInfo> {
         }
 
         debug!("sysfs: found camera: {name} ({device_path})");
-        cameras.push(CameraInfo { id: device_path.clone(), name, device_path });
+        cameras.push(CameraInfo {
+            id: device_path.clone(),
+            name,
+            device_path,
+        });
     }
 
     cameras

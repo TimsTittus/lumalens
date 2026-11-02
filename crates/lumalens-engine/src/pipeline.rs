@@ -69,8 +69,26 @@ impl Pipeline {
             .map_err(|e| EngineError::PipelineBuildFailed(format!("videoconvert: {e}")))?;
 
         let pipeline = gst::Pipeline::default();
-        pipeline.add_many([&src, &capsfilter, &convert1, &balance, &tee, &queue, &convert2, sink])?;
-        gst::Element::link_many([&src, &capsfilter, &convert1, &balance, &tee, &queue, &convert2, sink])?;
+        pipeline.add_many([
+            &src,
+            &capsfilter,
+            &convert1,
+            &balance,
+            &tee,
+            &queue,
+            &convert2,
+            sink,
+        ])?;
+        gst::Element::link_many([
+            &src,
+            &capsfilter,
+            &convert1,
+            &balance,
+            &tee,
+            &queue,
+            &convert2,
+            sink,
+        ])?;
 
         Ok(Self {
             inner: pipeline,
@@ -170,21 +188,21 @@ impl Pipeline {
             bin.add_many([&queue, &convert, &capsfilter, &v4l2sink])?;
             gst::Element::link_many([&queue, &convert, &capsfilter, &v4l2sink])?;
 
-            let queue_sink = queue.static_pad("sink").ok_or_else(|| {
-                EngineError::PipelineBuildFailed("queue sink pad missing".into())
-            })?;
+            let queue_sink = queue
+                .static_pad("sink")
+                .ok_or_else(|| EngineError::PipelineBuildFailed("queue sink pad missing".into()))?;
             let ghost = gst::GhostPad::with_target(&queue_sink)
                 .map_err(|e| EngineError::PipelineBuildFailed(format!("ghost pad: {e}")))?;
             bin.add_pad(&ghost)?;
 
             self.inner.add(&bin)?;
 
-            let tee_src = tee.request_pad_simple("src_%u").ok_or_else(|| {
-                EngineError::PipelineBuildFailed("tee pad request failed".into())
-            })?;
-            tee_src.link(&ghost).map_err(|e| {
-                EngineError::PipelineBuildFailed(format!("tee-vcam link: {e:?}"))
-            })?;
+            let tee_src = tee
+                .request_pad_simple("src_%u")
+                .ok_or_else(|| EngineError::PipelineBuildFailed("tee pad request failed".into()))?;
+            tee_src
+                .link(&ghost)
+                .map_err(|e| EngineError::PipelineBuildFailed(format!("tee-vcam link: {e:?}")))?;
 
             bin.sync_state_with_parent()?;
 
@@ -243,11 +261,7 @@ impl Pipeline {
     }
 }
 
-fn classify_bus_error(
-    error: &gst::glib::Error,
-    src_name: &str,
-    device_path: &str,
-) -> EngineError {
+fn classify_bus_error(error: &gst::glib::Error, src_name: &str, device_path: &str) -> EngineError {
     if src_name == "src" {
         if let Some(kind) = error.kind::<gst::ResourceError>() {
             if matches!(

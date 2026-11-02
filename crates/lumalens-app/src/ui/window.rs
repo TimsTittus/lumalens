@@ -165,31 +165,33 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
 
     let eng = Rc::clone(&engine);
     let vcam_toast = toast_overlay.clone();
-    controls.virtual_cam_switch.connect_state_set(move |_switch, state| {
-        if state {
-            match lumalens_engine::virtual_cam::find_device() {
-                Some(_) => {
-                    if let Some(ref e) = *eng.borrow() {
-                        e.send(EngineCommand::EnableVirtualCamera(true));
+    controls
+        .virtual_cam_switch
+        .connect_state_set(move |_switch, state| {
+            if state {
+                match lumalens_engine::virtual_cam::find_device() {
+                    Some(_) => {
+                        if let Some(ref e) = *eng.borrow() {
+                            e.send(EngineCommand::EnableVirtualCamera(true));
+                        }
+                        glib::Propagation::Proceed
                     }
-                    glib::Propagation::Proceed
+                    None => {
+                        warn!("virtual camera toggle: device not found");
+                        let msg = lumalens_engine::virtual_cam::module_install_instructions();
+                        let t = adw::Toast::new(msg);
+                        t.set_timeout(5);
+                        vcam_toast.add_toast(t);
+                        glib::Propagation::Stop
+                    }
                 }
-                None => {
-                    warn!("virtual camera toggle: device not found");
-                    let msg = lumalens_engine::virtual_cam::module_install_instructions();
-                    let t = adw::Toast::new(msg);
-                    t.set_timeout(5);
-                    vcam_toast.add_toast(t);
-                    glib::Propagation::Stop
+            } else {
+                if let Some(ref e) = *eng.borrow() {
+                    e.send(EngineCommand::EnableVirtualCamera(false));
                 }
+                glib::Propagation::Proceed
             }
-        } else {
-            if let Some(ref e) = *eng.borrow() {
-                e.send(EngineCommand::EnableVirtualCamera(false));
-            }
-            glib::Propagation::Proceed
-        }
-    });
+        });
 
     // --- event polling ------------------------------------------------------
 

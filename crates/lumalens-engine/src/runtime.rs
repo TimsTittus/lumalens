@@ -7,7 +7,7 @@
 //!   polls this with a `glib::timeout_add_local` source so that event handlers
 //!   can safely touch widgets without `Send` bounds.
 
-use std::sync::{mpsc, Mutex};
+use std::sync::{Mutex, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -48,7 +48,10 @@ pub fn spawn(sink: gst::Element) -> (Engine, mpsc::Receiver<EngineEvent>) {
         .spawn(move || engine_loop(cmd_rx, cmd_tx_clone, event_tx, sink))
         .expect("failed to spawn engine thread");
 
-    let engine = Engine { cmd_tx, _thread: handle };
+    let engine = Engine {
+        cmd_tx,
+        _thread: handle,
+    };
 
     (engine, event_rx)
 }
@@ -105,8 +108,13 @@ fn engine_loop(
                 Ok(cmd) => cmd,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     if pipeline.is_none() {
-                        try_auto_discover(&sink, &cmd_tx, &event_tx, &mut pipeline,
-                                          &mut last_camera_count);
+                        try_auto_discover(
+                            &sink,
+                            &cmd_tx,
+                            &event_tx,
+                            &mut pipeline,
+                            &mut last_camera_count,
+                        );
                     } else {
                         refresh_camera_list(&event_tx, &mut last_camera_count);
                     }
@@ -318,10 +326,7 @@ fn try_auto_discover(
 
 /// Re-scan cameras while a pipeline is already running and update the UI
 /// dropdown if the set of available cameras changed.
-fn refresh_camera_list(
-    event_tx: &mpsc::Sender<EngineEvent>,
-    last_camera_count: &mut usize,
-) {
+fn refresh_camera_list(event_tx: &mpsc::Sender<EngineEvent>, last_camera_count: &mut usize) {
     let count = match camera::discover() {
         Ok(c) => c.len(),
         Err(_) => 0,

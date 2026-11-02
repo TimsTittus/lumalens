@@ -45,6 +45,12 @@ impl Controls {
         let output_group = adw::PreferencesGroup::builder().title("Output").build();
         output_group.add(&vcam_row);
 
-        Self { root, output_group, camera_row, brightness, virtual_cam_switch }
+        Self {
+            root,
+            output_group,
+            camera_row,
+            brightness,
+            virtual_cam_switch,
+        }
     }
 }
