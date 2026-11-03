@@ -7,6 +7,7 @@ use gstreamer as gst;
 use tracing::{debug, warn};
 
 pub use lumalens_common::CameraInfo;
+use lumalens_common::Resolution;
 
 use crate::errors::EngineError;
 
@@ -86,14 +87,56 @@ fn discover_via_monitor() -> Vec<CameraInfo> {
             .unwrap_or_else(|| name.clone());
 
         debug!("discovered camera: {name} (id={id}, path={device_path})");
+        let supported_resolutions = query_supported_resolutions(&device_path);
         cameras.push(CameraInfo {
             id,
             name,
             device_path,
+            supported_resolutions,
         });
     }
 
     cameras
+}
+
+/// Query which resolution presets a V4L2 device supports by probing its caps.
+pub fn query_supported_resolutions(device_path: &str) -> Vec<Resolution> {
+    let Ok(src) = gst::ElementFactory::make("v4l2src")
+        .property("device", device_path)
+        .build()
+    else {
+        warn!("failed to create v4l2src for caps query on {device_path}");
+        return vec![];
+    };
+
+    if src.set_state(gst::State::Ready).is_err() {
+        let _ = src.set_state(gst::State::Null);
+        warn!("failed to set v4l2src to READY for {device_path}");
+        return vec![];
+    }
+
+    let device_caps = match src.static_pad("src") {
+        Some(pad) => pad.query_caps(None),
+        None => {
+            let _ = src.set_state(gst::State::Null);
+            return vec![];
+        }
+    };
+
+    let _ = src.set_state(gst::State::Null);
+
+    Resolution::PRESETS
+        .iter()
+        .filter(|r| {
+            let test = gst::Caps::builder("video/x-raw")
+                .field("width", r.width as i32)
+                .field("height", r.height as i32)
+                .field("framerate", gst::Fraction::new(r.fps as i32, 1))
+                .build();
+            device_caps.can_intersect(&test)
+        })
+        .copied()
+        .collect()
 }
 
 /// Enumerate cameras via `/sys/class/video4linux` + sysfs attributes.
@@ -149,10 +192,12 @@ fn discover_v4l2_sysfs() -> Vec<CameraInfo> {
         }
 
         debug!("sysfs: found camera: {name} ({device_path})");
+        let supported_resolutions = query_supported_resolutions(&device_path);
         cameras.push(CameraInfo {
             id: device_path.clone(),
             name,
             device_path,
+            supported_resolutions,
         });
     }
 

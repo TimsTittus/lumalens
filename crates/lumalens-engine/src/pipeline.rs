@@ -19,6 +19,7 @@ pub const VIRTUAL_CAM_FORMAT: &str = "YUY2";
 /// called from within the engine crate without naming any GTK/GDK types.
 pub struct Pipeline {
     inner: gst::Pipeline,
+    res_filter: gst::Element,
     balance: gst::Element,
     flip: gst::Element,
     /// Cloned GStreamer ref to the sink, held for [`paintable()`](Self::paintable).
@@ -47,6 +48,13 @@ impl Pipeline {
         let convert1 = gst::ElementFactory::make("videoconvert")
             .build()
             .map_err(|e| EngineError::PipelineBuildFailed(format!("videoconvert: {e}")))?;
+
+        let res_caps = gst::Caps::builder("video/x-raw").build();
+        let res_filter = gst::ElementFactory::make("capsfilter")
+            .name("res-filter")
+            .property("caps", &res_caps)
+            .build()
+            .map_err(|e| EngineError::PipelineBuildFailed(format!("res capsfilter: {e}")))?;
 
         let balance = gst::ElementFactory::make("videobalance")
             .name("balance")
@@ -82,6 +90,7 @@ impl Pipeline {
             &src,
             &capsfilter,
             &convert1,
+            &res_filter,
             &balance,
             &flip,
             &tee,
@@ -93,6 +102,7 @@ impl Pipeline {
             &src,
             &capsfilter,
             &convert1,
+            &res_filter,
             &balance,
             &flip,
             &tee,
@@ -103,6 +113,7 @@ impl Pipeline {
 
         Ok(Self {
             inner: pipeline,
+            res_filter,
             balance,
             flip,
             sink_ref: sink.clone(),
@@ -135,6 +146,47 @@ impl Pipeline {
     pub fn set_saturation(&self, value: f32) {
         let clamped = value.clamp(0.0, 2.0);
         self.balance.set_property("saturation", clamped as f64);
+    }
+
+    pub fn set_resolution(&self, width: u32, height: u32, fps: u32) -> Result<(), EngineError> {
+        let prev_caps: gst::Caps = self.res_filter.property("caps");
+
+        let new_caps = gst::Caps::builder("video/x-raw")
+            .field("width", width as i32)
+            .field("height", height as i32)
+            .field("framerate", gst::Fraction::new(fps as i32, 1))
+            .build();
+
+        self.inner.set_state(gst::State::Ready)?;
+        let _ = self.inner.state(Some(gst::ClockTime::from_seconds(5)));
+
+        self.res_filter.set_property("caps", &new_caps);
+
+        if let Err(e) = self.inner.set_state(gst::State::Playing) {
+            let _ = self.inner.set_state(gst::State::Null);
+            let _ = self.inner.state(Some(gst::ClockTime::from_seconds(2)));
+            self.res_filter.set_property("caps", &prev_caps);
+            let _ = self.inner.set_state(gst::State::Playing);
+            return Err(EngineError::ResolutionChangeFailed(format!(
+                "{width}x{height}@{fps}: {e}"
+            )));
+        }
+
+        let (result, _, _) = self
+            .inner
+            .state(Some(gst::ClockTime::from_seconds(5)));
+        match result {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                let _ = self.inner.set_state(gst::State::Null);
+                let _ = self.inner.state(Some(gst::ClockTime::from_seconds(2)));
+                self.res_filter.set_property("caps", &prev_caps);
+                let _ = self.inner.set_state(gst::State::Playing);
+                Err(EngineError::ResolutionChangeFailed(format!(
+                    "{width}x{height}@{fps}: {e}"
+                )))
+            }
+        }
     }
 
     pub fn set_flip_method(&self, method: FlipMethod) {

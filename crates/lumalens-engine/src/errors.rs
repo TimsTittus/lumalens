@@ -21,4 +21,7 @@ pub enum EngineError {
 
     #[error("camera disconnected: {name}")]
     CameraDisconnected { name: String },
+
+    #[error("resolution change failed: {0}")]
+    ResolutionChangeFailed(String),
 }

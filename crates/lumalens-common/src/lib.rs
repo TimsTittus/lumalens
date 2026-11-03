@@ -2,12 +2,34 @@
 
 use serde::{Deserialize, Serialize};
 
+/// A discrete resolution + frame-rate combination a camera can produce.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Resolution {
+    pub width: u32,
+    pub height: u32,
+    pub fps: u32,
+}
+
+impl Resolution {
+    pub const PRESETS: &[Resolution] = &[
+        Resolution { width: 640, height: 480, fps: 30 },
+        Resolution { width: 1280, height: 720, fps: 30 },
+        Resolution { width: 1280, height: 720, fps: 60 },
+        Resolution { width: 1920, height: 1080, fps: 30 },
+    ];
+
+    pub fn label(self) -> String {
+        format!("{}x{} @ {} fps", self.width, self.height, self.fps)
+    }
+}
+
 /// Metadata for a discovered camera device.
 #[derive(Clone, Debug)]
 pub struct CameraInfo {
     pub id: String,
     pub name: String,
     pub device_path: String,
+    pub supported_resolutions: Vec<Resolution>,
 }
 
 /// Video flip / rotation method matching GStreamer's `videoflip` element.

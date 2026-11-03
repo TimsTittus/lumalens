@@ -11,6 +11,7 @@ pub struct Controls {
     pub output_group: adw::PreferencesGroup,
     pub preset_group: adw::PreferencesGroup,
     pub camera_row: adw::ComboRow,
+    pub resolution_dropdown: adw::ComboRow,
     pub brightness: gtk::Scale,
     pub contrast: gtk::Scale,
     pub saturation: gtk::Scale,
@@ -26,6 +27,11 @@ impl Controls {
     pub fn new() -> Self {
         let camera_row = adw::ComboRow::builder()
             .title("Camera")
+            .model(&gtk::StringList::new(&[]))
+            .build();
+
+        let resolution_dropdown = adw::ComboRow::builder()
+            .title("Resolution")
             .model(&gtk::StringList::new(&[]))
             .build();
 
@@ -74,6 +80,7 @@ impl Controls {
 
         let root = adw::PreferencesGroup::builder().title("Camera").build();
         root.add(&camera_row);
+        root.add(&resolution_dropdown);
         root.add(&brightness_row);
         root.add(&contrast_row);
         root.add(&saturation_row);
@@ -127,6 +134,7 @@ impl Controls {
             output_group,
             preset_group,
             camera_row,
+            resolution_dropdown,
             brightness,
             contrast,
             saturation,

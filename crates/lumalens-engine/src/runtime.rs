@@ -232,6 +232,15 @@ fn engine_loop(
                 }
             }
 
+            EngineCommand::SetResolution { width, height, fps } => {
+                if let Some(ref pipe) = pipeline {
+                    if let Err(e) = pipe.set_resolution(width, height, fps) {
+                        warn!("resolution change failed: {e}");
+                        emit(&event_tx, EngineEvent::Error(e.to_string()));
+                    }
+                }
+            }
+
             EngineCommand::EnableVirtualCamera(enabled) => {
                 if let Some(ref mut pipe) = pipeline {
                     if enabled {

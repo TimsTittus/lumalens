@@ -13,7 +13,7 @@ use libadwaita as adw;
 use libadwaita::prelude::*;
 use tracing::{info, warn};
 
-use lumalens_common::FlipMethod;
+use lumalens_common::{CameraInfo, FlipMethod, Resolution};
 use lumalens_config::ImageSettings;
 use lumalens_engine::commands::EngineCommand;
 use lumalens_engine::events::EngineEvent;
@@ -79,10 +79,14 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
     refresh_preset_dropdown(&controls.preset_dropdown, &presets);
 
     let camera_row = controls.camera_row.clone();
+    let resolution_dropdown = controls.resolution_dropdown.clone();
     let brightness_scale = controls.brightness.clone();
     let contrast_scale = controls.contrast.clone();
     let saturation_scale = controls.saturation.clone();
     let flip_dropdown = controls.flip_dropdown.clone();
+
+    let available_resolutions: Rc<RefCell<Vec<Resolution>>> = Rc::new(RefCell::new(Vec::new()));
+    let suppress_resolution_signal = Rc::new(Cell::new(false));
 
     // --- sidebar -------------------------------------------------------------
 
@@ -179,11 +183,16 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
     // --- camera dropdown signal ----------------------------------------------
 
     let device_paths: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+    let discovered_cameras: Rc<RefCell<Vec<CameraInfo>>> = Rc::new(RefCell::new(Vec::new()));
     let suppress_camera_signal = Rc::new(Cell::new(false));
 
     let eng = Rc::clone(&engine);
     let paths = Rc::clone(&device_paths);
+    let cams = Rc::clone(&discovered_cameras);
     let suppress = Rc::clone(&suppress_camera_signal);
+    let suppress_res_cam = Rc::clone(&suppress_resolution_signal);
+    let res_dd_cam = controls.resolution_dropdown.clone();
+    let avail_res_cam = Rc::clone(&available_resolutions);
     let cfg = Rc::clone(&config);
     let sched = schedule_save.clone();
     camera_row.connect_selected_notify(move |row| {
@@ -200,6 +209,52 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
                 e.send(EngineCommand::SelectCamera(path.clone()));
             }
             cfg.borrow_mut().camera.selected_id = path.clone();
+            sched();
+
+            let cameras = cams.borrow();
+            if let Some(cam) = cameras.get(idx as usize) {
+                let supported = &cam.supported_resolutions;
+                suppress_res_cam.set(true);
+                let labels: Vec<String> = supported.iter().map(|r| r.label()).collect();
+                let label_refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
+                res_dd_cam.set_model(Some(&gtk::StringList::new(&label_refs)));
+                *avail_res_cam.borrow_mut() = supported.clone();
+                if !supported.is_empty() {
+                    res_dd_cam.set_selected(0);
+                }
+                suppress_res_cam.set(false);
+            }
+        }
+    });
+
+    // --- resolution dropdown signal ------------------------------------------
+
+    let eng = Rc::clone(&engine);
+    let resolutions = Rc::clone(&available_resolutions);
+    let suppress = Rc::clone(&suppress_resolution_signal);
+    let cfg = Rc::clone(&config);
+    let sched = schedule_save.clone();
+    resolution_dropdown.connect_selected_notify(move |row| {
+        if suppress.get() {
+            return;
+        }
+        let idx = row.selected();
+        if idx == gtk::INVALID_LIST_POSITION {
+            return;
+        }
+        let res = resolutions.borrow();
+        if let Some(r) = res.get(idx as usize) {
+            if let Some(ref e) = *eng.borrow() {
+                e.send(EngineCommand::SetResolution {
+                    width: r.width,
+                    height: r.height,
+                    fps: r.fps,
+                });
+            }
+            let mut c = cfg.borrow_mut();
+            c.camera.resolution_width = r.width;
+            c.camera.resolution_height = r.height;
+            c.camera.fps = r.fps;
             sched();
         }
     });
@@ -487,13 +542,19 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
 
     let toast = toast_overlay.clone();
     let paths = Rc::clone(&device_paths);
+    let cams_event = Rc::clone(&discovered_cameras);
     let suppress = Rc::clone(&suppress_camera_signal);
+    let suppress_res = Rc::clone(&suppress_resolution_signal);
+    let res_dropdown = controls.resolution_dropdown.clone();
+    let avail_res = Rc::clone(&available_resolutions);
     let stack = content_stack;
     let eng_for_start = Rc::clone(&engine);
     let br_for_start = controls.brightness.clone();
     let co_for_start = controls.contrast.clone();
     let sa_for_start = controls.saturation.clone();
     let fl_for_start = controls.flip_dropdown.clone();
+    let res_dd_for_start = controls.resolution_dropdown.clone();
+    let avail_res_for_start = Rc::clone(&available_resolutions);
     let cfg_for_start = Rc::clone(&config);
     glib::timeout_add_local(Duration::from_millis(16), move || {
         while let Ok(event) = event_rx.try_recv() {
@@ -512,16 +573,20 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
                     };
 
                     paths.replace(cameras.iter().map(|c| c.device_path.clone()).collect());
+                    *cams_event.borrow_mut() = cameras.clone();
                     let names: Vec<&str> = cameras.iter().map(|c| c.name.as_str()).collect();
                     suppress.set(true);
                     camera_row.set_model(Some(&gtk::StringList::new(&names)));
 
                     if cameras.is_empty() {
                         stack.set_visible_child_name("no-cameras");
+                        suppress_res.set(true);
+                        avail_res.borrow_mut().clear();
+                        res_dropdown.set_model(Some(&gtk::StringList::new(&[] as &[&str])));
+                        suppress_res.set(false);
                     } else {
                         stack.set_visible_child_name("preview");
 
-                        // Prefer the config's saved camera, then the previously selected one
                         let saved_id = &cfg_for_start.borrow().camera.selected_id;
                         let idx = if !saved_id.is_empty() {
                             cameras.iter().position(|c| c.device_path == *saved_id)
@@ -535,14 +600,47 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
                         })
                         .unwrap_or(0);
                         camera_row.set_selected(idx as u32);
+
+                        let supported = &cameras[idx].supported_resolutions;
+                        suppress_res.set(true);
+                        let labels: Vec<String> =
+                            supported.iter().map(|r| r.label()).collect();
+                        let label_refs: Vec<&str> =
+                            labels.iter().map(|s| s.as_str()).collect();
+                        res_dropdown
+                            .set_model(Some(&gtk::StringList::new(&label_refs)));
+                        *avail_res.borrow_mut() = supported.clone();
+
+                        let cfg = cfg_for_start.borrow();
+                        let saved_res = Resolution {
+                            width: cfg.camera.resolution_width,
+                            height: cfg.camera.resolution_height,
+                            fps: cfg.camera.fps,
+                        };
+                        let res_idx = supported
+                            .iter()
+                            .position(|r| *r == saved_res)
+                            .unwrap_or(0);
+                        res_dropdown.set_selected(res_idx as u32);
+                        suppress_res.set(false);
                     }
 
                     suppress.set(false);
                 }
                 EngineEvent::Started => {
                     info!("engine started");
-                    // Sync pipeline with current UI/config state
                     if let Some(ref e) = *eng_for_start.borrow() {
+                        let res_idx = res_dd_for_start.selected();
+                        if res_idx != gtk::INVALID_LIST_POSITION {
+                            let resolutions = avail_res_for_start.borrow();
+                            if let Some(r) = resolutions.get(res_idx as usize) {
+                                e.send(EngineCommand::SetResolution {
+                                    width: r.width,
+                                    height: r.height,
+                                    fps: r.fps,
+                                });
+                            }
+                        }
                         e.send(EngineCommand::SetBrightness(br_for_start.value() as f32));
                         e.send(EngineCommand::SetContrast(co_for_start.value() as f32));
                         e.send(EngineCommand::SetSaturation(sa_for_start.value() as f32));
