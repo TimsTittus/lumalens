@@ -1,0 +1,71 @@
+# ============================================================================
+# LumaLens Flatpak manifest
+# ============================================================================
+#
+# SANDBOX CAPABILITIES — READ BEFORE PUBLISHING
+#
+# Camera INPUT works via the XDG Camera portal (org.freedesktop.portal.Camera)
+# combined with a pipewiresrc GStreamer element.  This path is fully supported
+# inside the Flatpak sandbox and requires no special kernel modules.
+#
+# Virtual camera OUTPUT via v4l2loopback is NOT supported inside the sandbox.
+# v4l2loopback is a kernel module that exposes a /dev/videoN node; Flatpak's
+# device isolation prevents the necessary ioctl calls even with --device=all,
+# and Flathub policy rejects --device=all outright.  Users who need the
+# virtual-camera feature must install the native package (AUR: lumalens).
+#
+# This is a known limitation tracked at:
+#   https://github.com/TimsTittus/lumalens/issues
+# (search for "flatpak virtual camera" or the label "flatpak-sandbox")
+#
+# The Flatpak build is therefore a preview/discovery vehicle — it gives new
+# users a zero-setup way to try LumaLens.  The native package remains the
+# recommended install for the full feature set.  See also the ADR at
+# docs/decisions/0003-flatpak-virtual-cam.md.
+# ============================================================================
+
+app-id: io.github.timstittus.lumalens
+runtime: org.gnome.Platform
+runtime-version: "47"
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+
+command: lumalens
+
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    CARGO_HOME: /run/build/lumalens/cargo
+    RUSTFLAGS: -C link-arg=-Wl,-rpath,$ORIGIN/../lib
+
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # Camera access via the XDG portal — covers INPUT only; see note above.
+  - --talk-name=org.freedesktop.portal.Camera
+
+modules:
+  - name: lumalens
+    buildsystem: simple
+    build-commands:
+      - cargo --offline build --release --bin lumalens
+      - install -Dm755 target/release/lumalens /app/bin/lumalens
+      - install -Dm644 data/io.github.timstittus.lumalens.desktop
+          /app/share/applications/io.github.timstittus.lumalens.desktop
+      - install -Dm644 data/io.github.timstittus.lumalens.svg
+          /app/share/icons/hicolor/scalable/apps/io.github.timstittus.lumalens.svg
+      - install -Dm644 data/io.github.timstittus.lumalens.metainfo.xml
+          /app/share/metainfo/io.github.timstittus.lumalens.metainfo.xml
+    build-options:
+      env:
+        CARGO_NET_OFFLINE: "true"
+    sources:
+      - type: dir
+        path: ../..
+      # Generated with flatpak-cargo-generator.py from Cargo.lock:
+      #   python3 flatpak-cargo-generator.py ../../Cargo.lock -o cargo-sources.json
+      # Regenerate whenever Cargo.lock changes.
+      - cargo-sources.json

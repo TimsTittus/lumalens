@@ -1,6 +1,5 @@
 # Rust
 target/
-Cargo.lock
 
 # Editor / IDE
 *.swp
@@ -23,6 +22,9 @@ Thumbs.db
 *.rpm
 *.pkg.tar.*
 *.flatpak
+
+# Flatpak
+packaging/flatpak/cargo-vendor/
 
 # Logs
 *.log

@@ -54,6 +54,19 @@ For development builds from `main`:
 yay -S lumalens-git
 ```
 
+### Flatpak
+
+```bash
+# Install from Flathub (once published)
+flatpak install flathub io.github.timstittus.lumalens
+```
+
+> **Note:** The Flatpak build does **not** support virtual camera output.
+> v4l2loopback requires kernel-level device access that the Flatpak sandbox
+> cannot provide. Camera input works normally via the XDG Camera portal.
+> For the full feature set including virtual camera, use the native package.
+> See [ADR 0003](docs/decisions/0003-flatpak-virtual-cam.md) for details.
+
 ### Build from source
 
 #### Arch Linux
@@ -99,6 +112,8 @@ To persist across reboots, see the
 - **Linux only.** No macOS or Windows support.
 - **v4l2loopback required** for virtual camera output — this is an
   out-of-tree kernel module. Secure Boot requires MOK enrollment.
+- **No virtual camera in Flatpak.** The sandbox blocks v4l2loopback
+  access. Use the native package for virtual camera output.
 - **Wayland tested on GNOME and KDE only.** X11 works via XWayland but
   is not the primary test target.
 - **No AI effects yet.** Background blur and segmentation are planned
@@ -111,7 +126,7 @@ See the [issue tracker](../../issues) for planned work. Key areas:
 
 - Fixed-stage effect engine
 - Optional AI background effects (blur, replace)
-- Flatpak packaging
+- Flatpak on Flathub (manifest ready, pending submission)
 
 ## Contributing
 
