@@ -603,12 +603,9 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
 
                         let supported = &cameras[idx].supported_resolutions;
                         suppress_res.set(true);
-                        let labels: Vec<String> =
-                            supported.iter().map(|r| r.label()).collect();
-                        let label_refs: Vec<&str> =
-                            labels.iter().map(|s| s.as_str()).collect();
-                        res_dropdown
-                            .set_model(Some(&gtk::StringList::new(&label_refs)));
+                        let labels: Vec<String> = supported.iter().map(|r| r.label()).collect();
+                        let label_refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
+                        res_dropdown.set_model(Some(&gtk::StringList::new(&label_refs)));
                         *avail_res.borrow_mut() = supported.clone();
 
                         let cfg = cfg_for_start.borrow();
@@ -617,10 +614,7 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
                             height: cfg.camera.resolution_height,
                             fps: cfg.camera.fps,
                         };
-                        let res_idx = supported
-                            .iter()
-                            .position(|r| *r == saved_res)
-                            .unwrap_or(0);
+                        let res_idx = supported.iter().position(|r| *r == saved_res).unwrap_or(0);
                         res_dropdown.set_selected(res_idx as u32);
                         suppress_res.set(false);
                     }

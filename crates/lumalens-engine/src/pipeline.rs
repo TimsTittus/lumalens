@@ -180,9 +180,7 @@ impl Pipeline {
             )));
         }
 
-        let (result, _, _) = self
-            .inner
-            .state(Some(gst::ClockTime::from_seconds(5)));
+        let (result, _, _) = self.inner.state(Some(gst::ClockTime::from_seconds(5)));
         match result {
             Ok(_) => Ok(()),
             Err(e) => {

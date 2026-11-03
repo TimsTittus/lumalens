@@ -1,0 +1,28 @@
+post_install() {
+    echo ""
+    echo "==> NOTE: Virtual camera support requires v4l2loopback-dkms."
+    echo ""
+    echo "    If you are using Secure Boot, the v4l2loopback kernel module"
+    echo "    must be signed before it can be loaded. Enroll a Machine Owner"
+    echo "    Key (MOK) and sign the module:"
+    echo ""
+    echo "      1. Generate a signing keypair:"
+    echo "           openssl req -new -x509 -newkey rsa:2048 -keyout MOK.priv \\"
+    echo "             -outform DER -out MOK.der -days 36500 -subj '/CN=v4l2loopback/' -nodes"
+    echo ""
+    echo "      2. Enroll the key (reboot required):"
+    echo "           sudo mokutil --import MOK.der"
+    echo ""
+    echo "      3. After reboot, sign the module:"
+    echo "           sudo /usr/lib/modules/\$(uname -r)/build/scripts/sign-file \\"
+    echo "             sha256 MOK.priv MOK.der \\"
+    echo "             /usr/lib/modules/\$(uname -r)/extramodules/v4l2loopback.ko.zst"
+    echo ""
+    echo "    See https://wiki.archlinux.org/title/Unified_Extensible_Firmware_Interface/Secure_Boot"
+    echo "    for details."
+    echo ""
+}
+
+post_upgrade() {
+    post_install
+}

@@ -17,10 +17,26 @@ pub struct Resolution {
 impl Resolution {
     /// Built-in resolution presets offered in the UI.
     pub const PRESETS: &[Resolution] = &[
-        Resolution { width: 640, height: 480, fps: 30 },
-        Resolution { width: 1280, height: 720, fps: 30 },
-        Resolution { width: 1280, height: 720, fps: 60 },
-        Resolution { width: 1920, height: 1080, fps: 30 },
+        Resolution {
+            width: 640,
+            height: 480,
+            fps: 30,
+        },
+        Resolution {
+            width: 1280,
+            height: 720,
+            fps: 30,
+        },
+        Resolution {
+            width: 1280,
+            height: 720,
+            fps: 60,
+        },
+        Resolution {
+            width: 1920,
+            height: 1080,
+            fps: 30,
+        },
     ];
 
     /// Human-readable label, e.g. `"1280x720 @ 30 fps"`.

@@ -1,0 +1,54 @@
+# Maintainer: Tims <[EMAIL_ADDRESS]>
+pkgname=lumalens-git
+pkgver=0.1.0.r0.gacaf655
+pkgrel=1
+pkgdesc='GTK4/Libadwaita camera app with live filters and virtual camera output (development build)'
+arch=('x86_64')
+url='https://github.com/TimsTittus/lumalens'
+license=('GPL-3.0-or-later')
+depends=(
+    'gtk4'
+    'libadwaita'
+    'gstreamer'
+    'gst-plugins-base'
+    'gst-plugins-good'
+    'gst-plugins-bad'
+    'gst-libav'
+)
+optdepends=(
+    'v4l2loopback-dkms: for virtual camera output'
+    'v4l-utils: for debugging camera devices'
+)
+makedepends=('cargo' 'pkgconf' 'git')
+provides=("lumalens=${pkgver%%.*}")
+conflicts=('lumalens')
+source=("$pkgname::git+$url.git")
+sha256sums=('SKIP')
+install=lumalens.install
+
+pkgver() {
+    cd "$pkgname"
+    git describe --long --tags --abbrev=7 | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g'
+}
+
+prepare() {
+    cd "$pkgname"
+    export RUSTUP_TOOLCHAIN=stable
+    cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+    cd "$pkgname"
+    export RUSTUP_TOOLCHAIN=stable
+    export CARGO_TARGET_DIR=target
+    cargo build --release --frozen --workspace
+}
+
+package() {
+    cd "$pkgname"
+    install -Dm755 target/release/lumalens "$pkgdir/usr/bin/lumalens"
+    install -Dm644 data/io.github.timstittus.lumalens.desktop \
+        "$pkgdir/usr/share/applications/io.github.timstittus.lumalens.desktop"
+    install -Dm644 data/io.github.timstittus.lumalens.svg \
+        "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.timstittus.lumalens.svg"
+}
