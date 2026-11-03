@@ -1,5 +1,7 @@
 //! Shared types used across all LumaLens crates.
 
+use serde::{Deserialize, Serialize};
+
 /// Metadata for a discovered camera device.
 #[derive(Clone, Debug)]
 pub struct CameraInfo {
@@ -9,14 +11,20 @@ pub struct CameraInfo {
 }
 
 /// Video flip / rotation method matching GStreamer's `videoflip` element.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FlipMethod {
     #[default]
+    #[serde(rename = "none")]
     None,
+    #[serde(rename = "horizontal-flip")]
     HorizontalFlip,
+    #[serde(rename = "vertical-flip")]
     VerticalFlip,
+    #[serde(rename = "clockwise")]
     Clockwise,
+    #[serde(rename = "rotate-180")]
     Rotate180,
+    #[serde(rename = "counterclockwise")]
     Counterclockwise,
 }
 

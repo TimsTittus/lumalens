@@ -9,12 +9,17 @@ use lumalens_common::FlipMethod;
 pub struct Controls {
     pub root: adw::PreferencesGroup,
     pub output_group: adw::PreferencesGroup,
+    pub preset_group: adw::PreferencesGroup,
     pub camera_row: adw::ComboRow,
     pub brightness: gtk::Scale,
     pub contrast: gtk::Scale,
     pub saturation: gtk::Scale,
     pub flip_dropdown: adw::ComboRow,
     pub virtual_cam_switch: gtk::Switch,
+    pub preset_dropdown: adw::ComboRow,
+    pub apply_preset_btn: gtk::Button,
+    pub save_preset_btn: gtk::Button,
+    pub delete_preset_btn: gtk::Button,
 }
 
 impl Controls {
@@ -83,15 +88,54 @@ impl Controls {
         let output_group = adw::PreferencesGroup::builder().title("Output").build();
         output_group.add(&vcam_row);
 
+        // --- presets ---
+
+        let preset_dropdown = adw::ComboRow::builder()
+            .title("Preset")
+            .model(&gtk::StringList::new(&[]))
+            .build();
+
+        let apply_preset_btn = gtk::Button::builder()
+            .label("Apply")
+            .css_classes(["suggested-action"])
+            .build();
+
+        let save_preset_btn = gtk::Button::builder().label("Save As…").build();
+
+        let delete_preset_btn = gtk::Button::builder()
+            .label("Delete")
+            .css_classes(["destructive-action"])
+            .build();
+
+        let btn_box = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .spacing(6)
+            .halign(gtk::Align::Center)
+            .margin_top(6)
+            .margin_bottom(6)
+            .build();
+        btn_box.append(&apply_preset_btn);
+        btn_box.append(&save_preset_btn);
+        btn_box.append(&delete_preset_btn);
+
+        let preset_group = adw::PreferencesGroup::builder().title("Presets").build();
+        preset_group.add(&preset_dropdown);
+        preset_group.add(&btn_box);
+
         Self {
             root,
             output_group,
+            preset_group,
             camera_row,
             brightness,
             contrast,
             saturation,
             flip_dropdown,
             virtual_cam_switch,
+            preset_dropdown,
+            apply_preset_btn,
+            save_preset_btn,
+            delete_preset_btn,
         }
     }
 }

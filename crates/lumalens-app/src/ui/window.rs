@@ -14,6 +14,7 @@ use libadwaita::prelude::*;
 use tracing::{info, warn};
 
 use lumalens_common::FlipMethod;
+use lumalens_config::ImageSettings;
 use lumalens_engine::commands::EngineCommand;
 use lumalens_engine::events::EngineEvent;
 use lumalens_engine::runtime;
@@ -23,6 +24,15 @@ use super::preview::PreviewWidget;
 
 /// Build and return the primary application window.
 pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
+    // --- config & presets ----------------------------------------------------
+
+    lumalens_config::preset::ensure_builtin_presets();
+    let config = Rc::new(RefCell::new(lumalens_config::load()));
+    let presets: Rc<RefCell<Vec<lumalens_config::preset::Preset>>> =
+        Rc::new(RefCell::new(lumalens_config::preset::list_presets()));
+
+    // --- pipeline ------------------------------------------------------------
+
     let preview = PreviewWidget::new();
 
     let sink = gst::ElementFactory::make("gtk4paintablesink")
@@ -30,9 +40,6 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
         .build()
         .expect("gtk4paintablesink not available — is gst-plugin-gtk4 installed?");
 
-    // `Pipeline::paintable()` returns `glib::Object` to keep `lumalens-engine`
-    // free of any `gdk` / `gtk4` compile-time dependency.  We perform the
-    // downcast here, in the app crate where `gdk` is already an explicit dep.
     let paintable_obj: gst::glib::Object = sink.property("paintable");
     let paintable = paintable_obj
         .downcast::<gdk::Paintable>()
@@ -43,13 +50,41 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
     let engine = Rc::new(RefCell::new(Some(engine)));
 
     let controls = Controls::new();
+
+    // --- apply config to initial UI state ------------------------------------
+
+    {
+        let cfg = config.borrow();
+        controls.brightness.set_value(cfg.image.brightness);
+        controls.contrast.set_value(cfg.image.contrast);
+        controls.saturation.set_value(cfg.image.saturation);
+        let flip_idx = FlipMethod::ALL
+            .iter()
+            .position(|&m| m == cfg.image.flip)
+            .unwrap_or(0);
+        controls.flip_dropdown.set_selected(flip_idx as u32);
+    }
+
+    // --- populate preset dropdown --------------------------------------------
+
+    fn refresh_preset_dropdown(
+        dropdown: &adw::ComboRow,
+        presets: &Rc<RefCell<Vec<lumalens_config::preset::Preset>>>,
+    ) {
+        let list = presets.borrow();
+        let names: Vec<&str> = list.iter().map(|p| p.name.as_str()).collect();
+        dropdown.set_model(Some(&gtk::StringList::new(&names)));
+    }
+
+    refresh_preset_dropdown(&controls.preset_dropdown, &presets);
+
     let camera_row = controls.camera_row.clone();
     let brightness_scale = controls.brightness.clone();
     let contrast_scale = controls.contrast.clone();
     let saturation_scale = controls.saturation.clone();
     let flip_dropdown = controls.flip_dropdown.clone();
 
-    // --- sidebar -----------------------------------------------------------
+    // --- sidebar -------------------------------------------------------------
 
     let sidebar_box = gtk::Box::new(gtk::Orientation::Vertical, 12);
     sidebar_box.set_margin_top(12);
@@ -57,6 +92,7 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
     sidebar_box.set_margin_start(12);
     sidebar_box.set_margin_end(12);
     sidebar_box.append(&controls.root);
+    sidebar_box.append(&controls.preset_group);
     sidebar_box.append(&controls.output_group);
 
     let sidebar = gtk::ScrolledWindow::builder()
@@ -64,7 +100,7 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
         .child(&sidebar_box)
         .build();
 
-    // --- content ------------------------------------------------------------
+    // --- content -------------------------------------------------------------
 
     let sidebar_btn = gtk::ToggleButton::builder()
         .icon_name("sidebar-show-symbolic")
@@ -93,7 +129,7 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
     toolbar_view.add_top_bar(&header);
     toolbar_view.set_content(Some(&toast_overlay));
 
-    // --- split view ---------------------------------------------------------
+    // --- split view ----------------------------------------------------------
 
     let split_view = adw::OverlaySplitView::builder()
         .content(&toolbar_view)
@@ -117,7 +153,30 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
         .content(&split_view)
         .build();
 
-    // --- camera dropdown signal ---------------------------------------------
+    // --- config save debounce ------------------------------------------------
+
+    let save_debounce: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+
+    let schedule_save = {
+        let config = Rc::clone(&config);
+        let debounce = Rc::clone(&save_debounce);
+        move || {
+            if let Some(id) = debounce.borrow_mut().take() {
+                id.remove();
+            }
+            let cfg = Rc::clone(&config);
+            let deb = Rc::clone(&debounce);
+            let id = glib::timeout_add_local_once(Duration::from_millis(500), move || {
+                deb.borrow_mut().take();
+                if let Err(e) = lumalens_config::save(&cfg.borrow()) {
+                    warn!("failed to save config: {e}");
+                }
+            });
+            debounce.borrow_mut().replace(id);
+        }
+    };
+
+    // --- camera dropdown signal ----------------------------------------------
 
     let device_paths: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
     let suppress_camera_signal = Rc::new(Cell::new(false));
@@ -125,6 +184,8 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
     let eng = Rc::clone(&engine);
     let paths = Rc::clone(&device_paths);
     let suppress = Rc::clone(&suppress_camera_signal);
+    let cfg = Rc::clone(&config);
+    let sched = schedule_save.clone();
     camera_row.connect_selected_notify(move |row| {
         if suppress.get() {
             return;
@@ -138,21 +199,28 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
             if let Some(ref e) = *eng.borrow() {
                 e.send(EngineCommand::SelectCamera(path.clone()));
             }
+            cfg.borrow_mut().camera.selected_id = path.clone();
+            sched();
         }
     });
 
-    // --- brightness debounce ------------------------------------------------
+    // --- brightness debounce -------------------------------------------------
 
     let debounce_id: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
 
     let eng = Rc::clone(&engine);
     let debounce = Rc::clone(&debounce_id);
+    let cfg = Rc::clone(&config);
+    let sched = schedule_save.clone();
     brightness_scale.connect_value_changed(move |scale| {
         let value = scale.value() as f32;
 
         if let Some(id) = debounce.borrow_mut().take() {
             id.remove();
         }
+
+        cfg.borrow_mut().image.brightness = scale.value();
+        sched();
 
         let eng_inner = Rc::clone(&eng);
         let debounce_inner = Rc::clone(&debounce);
@@ -171,12 +239,17 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
 
     let eng = Rc::clone(&engine);
     let debounce = Rc::clone(&contrast_debounce_id);
+    let cfg = Rc::clone(&config);
+    let sched = schedule_save.clone();
     contrast_scale.connect_value_changed(move |scale| {
         let value = scale.value() as f32;
 
         if let Some(id) = debounce.borrow_mut().take() {
             id.remove();
         }
+
+        cfg.borrow_mut().image.contrast = scale.value();
+        sched();
 
         let eng_inner = Rc::clone(&eng);
         let debounce_inner = Rc::clone(&debounce);
@@ -195,12 +268,17 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
 
     let eng = Rc::clone(&engine);
     let debounce = Rc::clone(&saturation_debounce_id);
+    let cfg = Rc::clone(&config);
+    let sched = schedule_save.clone();
     saturation_scale.connect_value_changed(move |scale| {
         let value = scale.value() as f32;
 
         if let Some(id) = debounce.borrow_mut().take() {
             id.remove();
         }
+
+        cfg.borrow_mut().image.saturation = scale.value();
+        sched();
 
         let eng_inner = Rc::clone(&eng);
         let debounce_inner = Rc::clone(&debounce);
@@ -216,12 +294,16 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
     // --- flip dropdown -------------------------------------------------------
 
     let eng = Rc::clone(&engine);
+    let cfg = Rc::clone(&config);
+    let sched = schedule_save.clone();
     flip_dropdown.connect_selected_notify(move |row| {
         let idx = row.selected() as usize;
         if let Some(&method) = FlipMethod::ALL.get(idx) {
             if let Some(ref e) = *eng.borrow() {
                 e.send(EngineCommand::SetFlip(method));
             }
+            cfg.borrow_mut().image.flip = method;
+            sched();
         }
     });
 
@@ -229,9 +311,14 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
 
     let eng = Rc::clone(&engine);
     let vcam_toast = toast_overlay.clone();
+    let cfg = Rc::clone(&config);
+    let sched = schedule_save.clone();
     controls
         .virtual_cam_switch
         .connect_state_set(move |_switch, state| {
+            cfg.borrow_mut().virtual_camera.enabled = state;
+            sched();
+
             if state {
                 match lumalens_engine::virtual_cam::find_device() {
                     Some(_) => {
@@ -257,12 +344,157 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
             }
         });
 
-    // --- event polling ------------------------------------------------------
+    // --- preset: Apply -------------------------------------------------------
+
+    let preset_dd = controls.preset_dropdown.clone();
+    let presets_ref = Rc::clone(&presets);
+    let eng = Rc::clone(&engine);
+    let cfg = Rc::clone(&config);
+    let sched = schedule_save.clone();
+    let br = controls.brightness.clone();
+    let co = controls.contrast.clone();
+    let sa = controls.saturation.clone();
+    let fl = controls.flip_dropdown.clone();
+    controls.apply_preset_btn.connect_clicked(move |_| {
+        let idx = preset_dd.selected();
+        if idx == gtk::INVALID_LIST_POSITION {
+            return;
+        }
+        let list = presets_ref.borrow();
+        let Some(preset) = list.get(idx as usize) else {
+            return;
+        };
+
+        apply_image_settings(&preset.image, &br, &co, &sa, &fl, &eng, &cfg, &sched);
+    });
+
+    // --- preset: Save As -----------------------------------------------------
+
+    let preset_dd = controls.preset_dropdown.clone();
+    let presets_ref = Rc::clone(&presets);
+    let cfg = Rc::clone(&config);
+    let win = window.clone();
+    let save_toast = toast_overlay.clone();
+    controls.save_preset_btn.connect_clicked(move |_| {
+        let dialog = adw::MessageDialog::new(
+            Some(&win),
+            Some("Save Preset"),
+            Some("Enter a name for the preset:"),
+        );
+        dialog.add_response("cancel", "Cancel");
+        dialog.add_response("save", "Save");
+        dialog.set_response_appearance("save", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("save"));
+        dialog.set_close_response("cancel");
+
+        let entry = gtk::Entry::builder()
+            .placeholder_text("Preset name")
+            .activates_default(true)
+            .build();
+        dialog.set_extra_child(Some(&entry));
+
+        let cfg_inner = Rc::clone(&cfg);
+        let presets_inner = Rc::clone(&presets_ref);
+        let dd = preset_dd.clone();
+        let toast_inner = save_toast.clone();
+        dialog.connect_response(None, move |dialog, response| {
+            if response == "save" {
+                let name = entry.text().trim().to_string();
+                if name.is_empty() {
+                    return;
+                }
+                let image = cfg_inner.borrow().image.clone();
+                match lumalens_config::preset::save_preset(&name, &image) {
+                    Ok(()) => {
+                        *presets_inner.borrow_mut() = lumalens_config::preset::list_presets();
+                        refresh_preset_dropdown(&dd, &presets_inner);
+                        let t = adw::Toast::new(&format!("Preset \"{name}\" saved"));
+                        t.set_timeout(3);
+                        toast_inner.add_toast(t);
+                    }
+                    Err(e) => {
+                        warn!("failed to save preset: {e}");
+                        let t = adw::Toast::new(&format!("Failed to save preset: {e}"));
+                        t.set_timeout(5);
+                        toast_inner.add_toast(t);
+                    }
+                }
+            }
+            dialog.close();
+        });
+
+        dialog.present();
+    });
+
+    // --- preset: Delete ------------------------------------------------------
+
+    let preset_dd = controls.preset_dropdown.clone();
+    let presets_ref = Rc::clone(&presets);
+    let delete_toast = toast_overlay.clone();
+    let win2 = window.clone();
+    controls.delete_preset_btn.connect_clicked(move |_| {
+        let idx = preset_dd.selected();
+        if idx == gtk::INVALID_LIST_POSITION {
+            return;
+        }
+        let preset_name = {
+            let list = presets_ref.borrow();
+            match list.get(idx as usize) {
+                Some(p) => p.name.clone(),
+                None => return,
+            }
+        };
+
+        let dialog = adw::MessageDialog::new(
+            Some(&win2),
+            Some("Delete Preset"),
+            Some(&format!("Delete the preset \"{}\"?", preset_name)),
+        );
+        dialog.add_response("cancel", "Cancel");
+        dialog.add_response("delete", "Delete");
+        dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+        dialog.set_default_response(Some("cancel"));
+        dialog.set_close_response("cancel");
+
+        let presets_inner = Rc::clone(&presets_ref);
+        let dd = preset_dd.clone();
+        let toast_inner = delete_toast.clone();
+        dialog.connect_response(None, move |dialog, response| {
+            if response == "delete" {
+                match lumalens_config::preset::delete_preset(&preset_name) {
+                    Ok(()) => {
+                        *presets_inner.borrow_mut() = lumalens_config::preset::list_presets();
+                        refresh_preset_dropdown(&dd, &presets_inner);
+                        let t = adw::Toast::new(&format!("Preset \"{preset_name}\" deleted"));
+                        t.set_timeout(3);
+                        toast_inner.add_toast(t);
+                    }
+                    Err(e) => {
+                        warn!("failed to delete preset: {e}");
+                        let t = adw::Toast::new(&format!("Failed to delete preset: {e}"));
+                        t.set_timeout(5);
+                        toast_inner.add_toast(t);
+                    }
+                }
+            }
+            dialog.close();
+        });
+
+        dialog.present();
+    });
+
+    // --- event polling -------------------------------------------------------
 
     let toast = toast_overlay.clone();
     let paths = Rc::clone(&device_paths);
     let suppress = Rc::clone(&suppress_camera_signal);
     let stack = content_stack;
+    let eng_for_start = Rc::clone(&engine);
+    let br_for_start = controls.brightness.clone();
+    let co_for_start = controls.contrast.clone();
+    let sa_for_start = controls.saturation.clone();
+    let fl_for_start = controls.flip_dropdown.clone();
+    let cfg_for_start = Rc::clone(&config);
     glib::timeout_add_local(Duration::from_millis(16), move || {
         while let Ok(event) = event_rx.try_recv() {
             match event {
@@ -288,10 +520,20 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
                         stack.set_visible_child_name("no-cameras");
                     } else {
                         stack.set_visible_child_name("preview");
-                        let idx = old_selected
-                            .as_ref()
-                            .and_then(|old| cameras.iter().position(|c| c.device_path == *old))
-                            .unwrap_or(0);
+
+                        // Prefer the config's saved camera, then the previously selected one
+                        let saved_id = &cfg_for_start.borrow().camera.selected_id;
+                        let idx = if !saved_id.is_empty() {
+                            cameras.iter().position(|c| c.device_path == *saved_id)
+                        } else {
+                            None
+                        }
+                        .or_else(|| {
+                            old_selected
+                                .as_ref()
+                                .and_then(|old| cameras.iter().position(|c| c.device_path == *old))
+                        })
+                        .unwrap_or(0);
                         camera_row.set_selected(idx as u32);
                     }
 
@@ -299,6 +541,16 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
                 }
                 EngineEvent::Started => {
                     info!("engine started");
+                    // Sync pipeline with current UI/config state
+                    if let Some(ref e) = *eng_for_start.borrow() {
+                        e.send(EngineCommand::SetBrightness(br_for_start.value() as f32));
+                        e.send(EngineCommand::SetContrast(co_for_start.value() as f32));
+                        e.send(EngineCommand::SetSaturation(sa_for_start.value() as f32));
+                        if let Some(&method) = FlipMethod::ALL.get(fl_for_start.selected() as usize)
+                        {
+                            e.send(EngineCommand::SetFlip(method));
+                        }
+                    }
                 }
                 EngineEvent::Stopped => {
                     info!("engine stopped");
@@ -314,7 +566,7 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
         glib::ControlFlow::Continue
     });
 
-    // --- lifecycle ----------------------------------------------------------
+    // --- lifecycle ------------------------------------------------------------
 
     let eng = Rc::clone(&engine);
     window.connect_realize(move |_| {
@@ -324,7 +576,17 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
     });
 
     let eng = Rc::clone(&engine);
+    let cfg = Rc::clone(&config);
+    let save_deb = Rc::clone(&save_debounce);
     window.connect_close_request(move |_| {
+        // Flush any pending config save
+        if let Some(id) = save_deb.borrow_mut().take() {
+            id.remove();
+        }
+        if let Err(e) = lumalens_config::save(&cfg.borrow()) {
+            warn!("failed to save config on exit: {e}");
+        }
+
         if let Some(e) = eng.borrow_mut().take() {
             e.shutdown();
         }
@@ -332,4 +594,40 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
     });
 
     window
+}
+
+/// Apply an `ImageSettings` preset to the UI controls and engine.
+#[allow(clippy::too_many_arguments)]
+fn apply_image_settings(
+    image: &ImageSettings,
+    brightness: &gtk::Scale,
+    contrast: &gtk::Scale,
+    saturation: &gtk::Scale,
+    flip_dropdown: &adw::ComboRow,
+    engine: &Rc<RefCell<Option<lumalens_engine::runtime::Engine>>>,
+    config: &Rc<RefCell<lumalens_config::Config>>,
+    schedule_save: &impl Fn(),
+) {
+    brightness.set_value(image.brightness);
+    contrast.set_value(image.contrast);
+    saturation.set_value(image.saturation);
+
+    let flip_idx = FlipMethod::ALL
+        .iter()
+        .position(|&m| m == image.flip)
+        .unwrap_or(0);
+    flip_dropdown.set_selected(flip_idx as u32);
+
+    {
+        let mut cfg = config.borrow_mut();
+        cfg.image = image.clone();
+    }
+    schedule_save();
+
+    if let Some(ref e) = *engine.borrow() {
+        e.send(EngineCommand::SetBrightness(image.brightness as f32));
+        e.send(EngineCommand::SetContrast(image.contrast as f32));
+        e.send(EngineCommand::SetSaturation(image.saturation as f32));
+        e.send(EngineCommand::SetFlip(image.flip));
+    }
 }
