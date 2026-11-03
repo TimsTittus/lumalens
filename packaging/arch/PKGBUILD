@@ -44,4 +44,6 @@ package() {
         "$pkgdir/usr/share/applications/io.github.timstittus.lumalens.desktop"
     install -Dm644 data/io.github.timstittus.lumalens.svg \
         "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.timstittus.lumalens.svg"
+    install -Dm644 data/io.github.timstittus.lumalens.metainfo.xml \
+        "$pkgdir/usr/share/metainfo/io.github.timstittus.lumalens.metainfo.xml"
 }

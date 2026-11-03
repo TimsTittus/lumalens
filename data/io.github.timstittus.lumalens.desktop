@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=LumaLens
+Comment=Webcam customization studio
+Exec=lumalens
+Icon=io.github.timstittus.lumalens
+Type=Application
+Categories=AudioVideo;Video;
+Keywords=camera;webcam;video;filter;streaming;virtual;
+StartupNotify=true

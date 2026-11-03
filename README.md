@@ -31,9 +31,32 @@ GStreamer.
 - **Collapsible sidebar** with camera, image, preset, and output
   controls.
 
-## Install (build from source)
+## Install
 
-### Arch Linux
+### Arch Linux (binary package from AUR)
+
+```bash
+# Install from the Arch User Repository (AUR)
+yay -S lumalens
+```
+
+Or manually:
+
+```bash
+git clone https://aur.archlinux.org/lumalens.git
+cd lumalens
+makepkg -si
+```
+
+For development builds from `main`:
+
+```bash
+yay -S lumalens-git
+```
+
+### Build from source
+
+#### Arch Linux
 
 ```bash
 sudo pacman -S --needed \
@@ -43,7 +66,7 @@ sudo pacman -S --needed \
   v4l-utils
 ```
 
-### Fedora
+#### Fedora
 
 ```bash
 sudo dnf install \
@@ -54,7 +77,7 @@ sudo dnf install \
   v4l-utils
 ```
 
-### Build and run
+#### Build and run
 
 ```bash
 cargo run
@@ -89,7 +112,6 @@ See the [issue tracker](../../issues) for planned work. Key areas:
 - Fixed-stage effect engine
 - Optional AI background effects (blur, replace)
 - Flatpak packaging
-- AUR package
 
 ## Contributing
 

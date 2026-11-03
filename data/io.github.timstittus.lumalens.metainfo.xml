@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.timstittus.lumalens</id>
+
+  <name>LumaLens</name>
+  <summary>Webcam customization studio</summary>
+
+  <description>
+    <p>
+      LumaLens is a webcam customization application built with GTK4 and
+      GStreamer. It lets you tune brightness, contrast, saturation, and
+      orientation in real time, save your favourite looks as named presets,
+      and pipe the result to a virtual camera device so other applications
+      see your adjusted feed.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Live camera preview with hardware-accelerated GStreamer pipeline</li>
+      <li>Multi-camera support with hot-plug detection</li>
+      <li>Brightness, contrast, and saturation sliders</li>
+      <li>Mirror and rotation controls</li>
+      <li>Runtime resolution and frame-rate switching</li>
+      <li>Named image presets with three built-in defaults</li>
+      <li>Virtual camera output via v4l2loopback</li>
+      <li>Persistent configuration across sessions</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">io.github.timstittus.lumalens.desktop</launchable>
+
+  <url type="homepage">https://github.com/TimsTittus/lumalens</url>
+  <url type="bugtracker">https://github.com/TimsTittus/lumalens/issues</url>
+  <url type="vcs-browser">https://github.com/TimsTittus/lumalens</url>
+
+  <developer id="io.github.timstittus">
+    <name>Tims</name>
+  </developer>
+
+  <metadata_license>MIT</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <content_rating type="oars-1.1"/>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>Main window showing live camera preview with image controls</caption>
+      <image type="source">https://raw.githubusercontent.com/TimsTittus/lumalens/main/docs/screenshot.png</image>
+    </screenshot>
+  </screenshots>
+
+  <releases>
+    <release version="0.1.0" date="2026-11-03">
+      <description>
+        <p>Initial release.</p>
+        <ul>
+          <li>Live camera preview with GTK4 and GStreamer</li>
+          <li>Multi-camera support and hot-plug detection</li>
+          <li>Brightness, contrast, saturation, and flip controls</li>
+          <li>Runtime resolution and FPS switching</li>
+          <li>Virtual camera output via v4l2loopback</li>
+          <li>Image presets with three built-in defaults</li>
+          <li>Persistent configuration with atomic writes</li>
+        </ul>
+      </description>
+    </release>
+  </releases>
+
+  <provides>
+    <binary>lumalens</binary>
+  </provides>
+
+  <categories>
+    <category>AudioVideo</category>
+    <category>Video</category>
+  </categories>
+
+  <keywords>
+    <keyword>camera</keyword>
+    <keyword>webcam</keyword>
+    <keyword>video</keyword>
+    <keyword>filter</keyword>
+    <keyword>streaming</keyword>
+    <keyword>virtual camera</keyword>
+  </keywords>
+</component>
