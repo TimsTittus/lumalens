@@ -13,6 +13,7 @@ use libadwaita as adw;
 use libadwaita::prelude::*;
 use tracing::{info, warn};
 
+use lumalens_common::FlipMethod;
 use lumalens_engine::commands::EngineCommand;
 use lumalens_engine::events::EngineEvent;
 use lumalens_engine::runtime;
@@ -44,6 +45,9 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
     let controls = Controls::new();
     let camera_row = controls.camera_row.clone();
     let brightness_scale = controls.brightness.clone();
+    let contrast_scale = controls.contrast.clone();
+    let saturation_scale = controls.saturation.clone();
+    let flip_dropdown = controls.flip_dropdown.clone();
 
     // --- sidebar -----------------------------------------------------------
 
@@ -159,6 +163,66 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
             }
         });
         debounce.borrow_mut().replace(id);
+    });
+
+    // --- contrast debounce ---------------------------------------------------
+
+    let contrast_debounce_id: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+
+    let eng = Rc::clone(&engine);
+    let debounce = Rc::clone(&contrast_debounce_id);
+    contrast_scale.connect_value_changed(move |scale| {
+        let value = scale.value() as f32;
+
+        if let Some(id) = debounce.borrow_mut().take() {
+            id.remove();
+        }
+
+        let eng_inner = Rc::clone(&eng);
+        let debounce_inner = Rc::clone(&debounce);
+        let id = glib::timeout_add_local_once(Duration::from_millis(60), move || {
+            debounce_inner.borrow_mut().take();
+            if let Some(ref e) = *eng_inner.borrow() {
+                e.send(EngineCommand::SetContrast(value));
+            }
+        });
+        debounce.borrow_mut().replace(id);
+    });
+
+    // --- saturation debounce -------------------------------------------------
+
+    let saturation_debounce_id: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+
+    let eng = Rc::clone(&engine);
+    let debounce = Rc::clone(&saturation_debounce_id);
+    saturation_scale.connect_value_changed(move |scale| {
+        let value = scale.value() as f32;
+
+        if let Some(id) = debounce.borrow_mut().take() {
+            id.remove();
+        }
+
+        let eng_inner = Rc::clone(&eng);
+        let debounce_inner = Rc::clone(&debounce);
+        let id = glib::timeout_add_local_once(Duration::from_millis(60), move || {
+            debounce_inner.borrow_mut().take();
+            if let Some(ref e) = *eng_inner.borrow() {
+                e.send(EngineCommand::SetSaturation(value));
+            }
+        });
+        debounce.borrow_mut().replace(id);
+    });
+
+    // --- flip dropdown -------------------------------------------------------
+
+    let eng = Rc::clone(&engine);
+    flip_dropdown.connect_selected_notify(move |row| {
+        let idx = row.selected() as usize;
+        if let Some(&method) = FlipMethod::ALL.get(idx) {
+            if let Some(ref e) = *eng.borrow() {
+                e.send(EngineCommand::SetFlip(method));
+            }
+        }
     });
 
     // --- virtual camera switch -----------------------------------------------

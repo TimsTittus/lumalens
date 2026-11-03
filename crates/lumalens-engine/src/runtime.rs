@@ -196,6 +196,42 @@ fn engine_loop(
                 }
             }
 
+            EngineCommand::SetContrast(mut value) => {
+                while let Ok(next) = cmd_rx.try_recv() {
+                    match next {
+                        EngineCommand::SetContrast(v) => value = v,
+                        other => {
+                            stashed = Some(other);
+                            break;
+                        }
+                    }
+                }
+                if let Some(ref pipe) = pipeline {
+                    pipe.set_contrast(value);
+                }
+            }
+
+            EngineCommand::SetSaturation(mut value) => {
+                while let Ok(next) = cmd_rx.try_recv() {
+                    match next {
+                        EngineCommand::SetSaturation(v) => value = v,
+                        other => {
+                            stashed = Some(other);
+                            break;
+                        }
+                    }
+                }
+                if let Some(ref pipe) = pipeline {
+                    pipe.set_saturation(value);
+                }
+            }
+
+            EngineCommand::SetFlip(method) => {
+                if let Some(ref pipe) = pipeline {
+                    pipe.set_flip_method(method);
+                }
+            }
+
             EngineCommand::EnableVirtualCamera(enabled) => {
                 if let Some(ref mut pipe) = pipeline {
                     if enabled {

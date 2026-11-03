@@ -5,6 +5,8 @@ use std::sync::{Arc, Condvar, Mutex};
 use gstreamer as gst;
 use gstreamer::prelude::*;
 
+use lumalens_common::FlipMethod;
+
 use crate::errors::EngineError;
 
 pub const VIRTUAL_CAM_FORMAT: &str = "YUY2";
@@ -18,6 +20,7 @@ pub const VIRTUAL_CAM_FORMAT: &str = "YUY2";
 pub struct Pipeline {
     inner: gst::Pipeline,
     balance: gst::Element,
+    flip: gst::Element,
     /// Cloned GStreamer ref to the sink, held for [`paintable()`](Self::paintable).
     /// The engine thread owns the canonical reference; this clone is
     /// reference-counted at the GStreamer level and costs no extra allocation.
@@ -53,6 +56,12 @@ impl Pipeline {
             .build()
             .map_err(|e| EngineError::PipelineBuildFailed(format!("videobalance: {e}")))?;
 
+        let flip = gst::ElementFactory::make("videoflip")
+            .name("flip")
+            .property_from_str("method", "none")
+            .build()
+            .map_err(|e| EngineError::PipelineBuildFailed(format!("videoflip: {e}")))?;
+
         let tee = gst::ElementFactory::make("tee")
             .name("t")
             .build()
@@ -74,6 +83,7 @@ impl Pipeline {
             &capsfilter,
             &convert1,
             &balance,
+            &flip,
             &tee,
             &queue,
             &convert2,
@@ -84,6 +94,7 @@ impl Pipeline {
             &capsfilter,
             &convert1,
             &balance,
+            &flip,
             &tee,
             &queue,
             &convert2,
@@ -93,6 +104,7 @@ impl Pipeline {
         Ok(Self {
             inner: pipeline,
             balance,
+            flip,
             sink_ref: sink.clone(),
             device_path: device_path.to_string(),
             vcam_bin: None,
@@ -113,6 +125,21 @@ impl Pipeline {
     pub fn set_brightness(&self, value: f32) {
         let clamped = value.clamp(-1.0, 1.0);
         self.balance.set_property("brightness", clamped as f64);
+    }
+
+    pub fn set_contrast(&self, value: f32) {
+        let clamped = value.clamp(0.0, 2.0);
+        self.balance.set_property("contrast", clamped as f64);
+    }
+
+    pub fn set_saturation(&self, value: f32) {
+        let clamped = value.clamp(0.0, 2.0);
+        self.balance.set_property("saturation", clamped as f64);
+    }
+
+    pub fn set_flip_method(&self, method: FlipMethod) {
+        self.flip
+            .set_property_from_str("method", method.as_gst_str());
     }
 
     /// Returns the `gtk4paintablesink` paintable as an erased `glib::Object`.
@@ -160,12 +187,17 @@ impl Pipeline {
 
             let queue = gst::ElementFactory::make("queue")
                 .property("max-size-buffers", 2u32)
+                .property_from_str("leaky", "downstream")
                 .build()
                 .map_err(|e| EngineError::PipelineBuildFailed(format!("vcam queue: {e}")))?;
 
             let convert = gst::ElementFactory::make("videoconvert")
                 .build()
                 .map_err(|e| EngineError::PipelineBuildFailed(format!("vcam videoconvert: {e}")))?;
+
+            let scale = gst::ElementFactory::make("videoscale")
+                .build()
+                .map_err(|e| EngineError::PipelineBuildFailed(format!("vcam videoscale: {e}")))?;
 
             let caps = gst::Caps::builder("video/x-raw")
                 .field("format", VIRTUAL_CAM_FORMAT)
@@ -185,8 +217,8 @@ impl Pipeline {
                 .map_err(|e| EngineError::PipelineBuildFailed(format!("v4l2sink: {e}")))?;
 
             let bin = gst::Bin::builder().name("vcam-bin").build();
-            bin.add_many([&queue, &convert, &capsfilter, &v4l2sink])?;
-            gst::Element::link_many([&queue, &convert, &capsfilter, &v4l2sink])?;
+            bin.add_many([&queue, &convert, &scale, &capsfilter, &v4l2sink])?;
+            gst::Element::link_many([&queue, &convert, &scale, &capsfilter, &v4l2sink])?;
 
             let queue_sink = queue
                 .static_pad("sink")
