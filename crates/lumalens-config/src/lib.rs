@@ -1,4 +1,5 @@
 //! Persistent configuration for LumaLens.
+#![warn(missing_docs)]
 
 pub mod preset;
 
@@ -14,13 +15,17 @@ use tracing::warn;
 const CURRENT_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, thiserror::Error)]
+/// Errors that can occur when loading or saving configuration.
 pub enum ConfigError {
+    /// Filesystem I/O failure.
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+    /// TOML serialization failure.
     #[error("serialization error: {0}")]
     Serialize(#[from] toml::ser::Error),
 }
 
+/// Return the LumaLens configuration directory (`$XDG_CONFIG_HOME/lumalens`).
 pub fn config_dir() -> PathBuf {
     if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
         PathBuf::from(xdg).join("lumalens")
@@ -35,14 +40,19 @@ fn config_path() -> PathBuf {
     config_dir().join("config.toml")
 }
 
+/// Top-level application configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    /// Schema version for forward/backward migration.
     #[serde(default = "default_schema_version")]
     pub schema_version: u32,
+    /// Camera selection and resolution.
     #[serde(default)]
     pub camera: CameraSettings,
+    /// Image adjustment values.
     #[serde(default)]
     pub image: ImageSettings,
+    /// Virtual camera output state.
     #[serde(default)]
     pub virtual_camera: VirtualCameraSettings,
 }
@@ -62,14 +72,19 @@ fn default_schema_version() -> u32 {
     CURRENT_SCHEMA_VERSION
 }
 
+/// Persisted camera selection and capture settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CameraSettings {
+    /// Device path of the last-selected camera.
     #[serde(default)]
     pub selected_id: String,
+    /// Last-used frame width.
     #[serde(default = "default_resolution_width")]
     pub resolution_width: u32,
+    /// Last-used frame height.
     #[serde(default = "default_resolution_height")]
     pub resolution_height: u32,
+    /// Last-used frame rate.
     #[serde(default = "default_fps")]
     pub fps: u32,
 }
@@ -95,14 +110,19 @@ fn default_fps() -> u32 {
     30
 }
 
+/// Persisted image adjustment values.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageSettings {
+    /// Brightness (−1.0 to 1.0).
     #[serde(default)]
     pub brightness: f64,
+    /// Contrast (0.0 to 2.0).
     #[serde(default = "default_one")]
     pub contrast: f64,
+    /// Saturation (0.0 to 2.0).
     #[serde(default = "default_one")]
     pub saturation: f64,
+    /// Flip / rotation transform.
     #[serde(default)]
     pub flip: FlipMethod,
 }
@@ -122,8 +142,10 @@ fn default_one() -> f64 {
     1.0
 }
 
+/// Persisted virtual camera state.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VirtualCameraSettings {
+    /// Whether the virtual camera was last enabled.
     #[serde(default)]
     pub enabled: bool,
 }

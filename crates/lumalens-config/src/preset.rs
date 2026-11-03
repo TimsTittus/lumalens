@@ -18,9 +18,12 @@ const BUILTIN_PRESETS: &[(&str, &str)] = &[
     ("Cool", COOL_TOML),
 ];
 
+/// A named image-settings preset.
 #[derive(Debug, Clone)]
 pub struct Preset {
+    /// Display name (also the filename stem).
     pub name: String,
+    /// Image adjustment values.
     pub image: ImageSettings,
 }
 

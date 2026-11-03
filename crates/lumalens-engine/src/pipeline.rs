@@ -9,6 +9,7 @@ use lumalens_common::FlipMethod;
 
 use crate::errors::EngineError;
 
+/// Pixel format negotiated with the v4l2loopback virtual camera.
 pub const VIRTUAL_CAM_FORMAT: &str = "YUY2";
 
 /// Owns and drives the GStreamer pipeline for a camera session.
@@ -32,6 +33,7 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
+    /// Assemble the GStreamer pipeline for `device_path` and the shared `sink`.
     pub fn build(device_path: &str, sink: &gst::Element) -> Result<Self, EngineError> {
         let src = gst::ElementFactory::make("v4l2src")
             .name("src")
@@ -123,31 +125,37 @@ impl Pipeline {
         })
     }
 
+    /// Transition the pipeline to `Playing`.
     pub fn start(&self) -> Result<(), EngineError> {
         self.inner.set_state(gst::State::Playing)?;
         Ok(())
     }
 
+    /// Transition the pipeline to `Null`.
     pub fn stop(&self) -> Result<(), EngineError> {
         self.inner.set_state(gst::State::Null)?;
         Ok(())
     }
 
+    /// Set brightness on the `videobalance` element (−1.0 to 1.0).
     pub fn set_brightness(&self, value: f32) {
         let clamped = value.clamp(-1.0, 1.0);
         self.balance.set_property("brightness", clamped as f64);
     }
 
+    /// Set contrast on the `videobalance` element (0.0 to 2.0).
     pub fn set_contrast(&self, value: f32) {
         let clamped = value.clamp(0.0, 2.0);
         self.balance.set_property("contrast", clamped as f64);
     }
 
+    /// Set saturation on the `videobalance` element (0.0 to 2.0).
     pub fn set_saturation(&self, value: f32) {
         let clamped = value.clamp(0.0, 2.0);
         self.balance.set_property("saturation", clamped as f64);
     }
 
+    /// Change capture resolution at runtime. Reverts on negotiation failure.
     pub fn set_resolution(&self, width: u32, height: u32, fps: u32) -> Result<(), EngineError> {
         let prev_caps: gst::Caps = self.res_filter.property("caps");
 
@@ -189,6 +197,7 @@ impl Pipeline {
         }
     }
 
+    /// Set the flip / rotation method on the `videoflip` element.
     pub fn set_flip_method(&self, method: FlipMethod) {
         self.flip
             .set_property_from_str("method", method.as_gst_str());
@@ -222,6 +231,7 @@ impl Pipeline {
         });
     }
 
+    /// Dynamically attach or detach the v4l2loopback virtual camera branch.
     pub fn enable_virtual_camera(
         &mut self,
         enabled: bool,

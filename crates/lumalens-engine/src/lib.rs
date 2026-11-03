@@ -1,4 +1,5 @@
 //! Camera engine — pipeline management, device discovery, and virtual camera.
+#![warn(missing_docs)]
 
 pub mod camera;
 pub mod commands;

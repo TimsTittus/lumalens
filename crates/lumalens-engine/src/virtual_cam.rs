@@ -18,12 +18,14 @@ pub fn find_device() -> Option<String> {
     None
 }
 
+/// Check whether the `v4l2loopback` kernel module is currently loaded.
 pub fn is_module_loaded() -> bool {
     fs::read_to_string("/proc/modules")
         .map(|s| s.lines().any(|line| line.starts_with("v4l2loopback ")))
         .unwrap_or(false)
 }
 
+/// User-facing instructions for installing the v4l2loopback module.
 pub fn module_install_instructions() -> &'static str {
     "\
 v4l2loopback is required for virtual camera output.\n\

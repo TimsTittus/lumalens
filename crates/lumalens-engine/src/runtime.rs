@@ -20,24 +20,28 @@ use crate::errors::EngineError;
 use crate::events::EngineEvent;
 use crate::pipeline::Pipeline;
 
+/// Handle to the running engine thread.
 pub struct Engine {
     cmd_tx: mpsc::SyncSender<EngineCommand>,
     _thread: JoinHandle<()>,
 }
 
 impl Engine {
+    /// Send a command to the engine thread.
     pub fn send(&self, cmd: EngineCommand) {
         if let Err(e) = self.cmd_tx.try_send(cmd) {
             error!("failed to send engine command: {e}");
         }
     }
 
+    /// Stop the engine and join its thread.
     pub fn shutdown(self) {
         let _ = self.cmd_tx.send(EngineCommand::Shutdown);
         let _ = self._thread.join();
     }
 }
 
+/// Start the engine on a dedicated thread, returning a handle and event receiver.
 pub fn spawn(sink: gst::Element) -> (Engine, mpsc::Receiver<EngineEvent>) {
     let (cmd_tx, cmd_rx) = mpsc::sync_channel::<EngineCommand>(32);
     let (event_tx, event_rx) = mpsc::channel::<EngineEvent>();
