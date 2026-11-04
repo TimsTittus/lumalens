@@ -959,6 +959,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "lumalens-effects"
+version = "0.1.0"
+dependencies = [
+ "gstreamer",
+ "lumalens-common",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "lumalens-engine"
 version = "0.1.0"
 dependencies = [
@@ -966,6 +976,7 @@ dependencies = [
  "gstreamer-app",
  "gstreamer-video",
  "lumalens-common",
+ "lumalens-effects",
  "thiserror",
  "tracing",
 ]

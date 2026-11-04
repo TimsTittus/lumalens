@@ -1,6 +1,7 @@
 //! Commands sent from the UI to the engine.
 
 use lumalens_common::FlipMethod;
+use lumalens_effects::Stage;
 
 use crate::errors::EngineError;
 
@@ -31,6 +32,15 @@ pub enum EngineCommand {
     },
     /// Enable or disable the virtual camera output.
     EnableVirtualCamera(bool),
+    /// Reorder an effect within its stage.
+    ReorderEffect {
+        /// The stage containing the effect.
+        stage: Stage,
+        /// Source position within the stage.
+        from: usize,
+        /// Destination position within the stage.
+        to: usize,
+    },
     /// Shut down the engine thread.
     Shutdown,
     /// Internal: forwarded from the pipeline bus watch.

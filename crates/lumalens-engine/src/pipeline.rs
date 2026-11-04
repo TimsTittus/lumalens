@@ -4,8 +4,7 @@ use std::sync::{Arc, Condvar, Mutex};
 
 use gstreamer as gst;
 use gstreamer::prelude::*;
-
-use lumalens_common::FlipMethod;
+use lumalens_effects::EffectRegistry;
 
 use crate::errors::EngineError;
 
@@ -14,18 +13,13 @@ pub const VIRTUAL_CAM_FORMAT: &str = "YUY2";
 
 /// Owns and drives the GStreamer pipeline for a camera session.
 ///
-/// The `gtk4paintablesink` element is created on the GTK main thread and
-/// lent to [`build`](Self::build) via reference.  A cloned GStreamer
-/// reference is stored here so that [`paintable`](Self::paintable) can be
-/// called from within the engine crate without naming any GTK/GDK types.
+/// Effect elements (correction, transform, etc.) are built by the
+/// [`EffectRegistry`] and spliced into the pipeline at build time.
+/// Runtime property updates go through the registry's effect objects,
+/// which hold references to their live GStreamer elements.
 pub struct Pipeline {
     inner: gst::Pipeline,
     res_filter: gst::Element,
-    balance: gst::Element,
-    flip: gst::Element,
-    /// Cloned GStreamer ref to the sink, held for [`paintable()`](Self::paintable).
-    /// The engine thread owns the canonical reference; this clone is
-    /// reference-counted at the GStreamer level and costs no extra allocation.
     sink_ref: gst::Element,
     device_path: String,
     vcam_bin: Option<gst::Bin>,
@@ -33,8 +27,15 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    /// Assemble the GStreamer pipeline for `device_path` and the shared `sink`.
-    pub fn build(device_path: &str, sink: &gst::Element) -> Result<Self, EngineError> {
+    /// Assemble the GStreamer pipeline for `device_path`, the shared `sink`,
+    /// and effects from `registry`.
+    pub fn build(
+        device_path: &str,
+        sink: &gst::Element,
+        registry: &mut EffectRegistry,
+    ) -> Result<Self, EngineError> {
+        // --- Capture stage (hard-coded) ---
+
         let src = gst::ElementFactory::make("v4l2src")
             .name("src")
             .property("device", device_path)
@@ -58,19 +59,13 @@ impl Pipeline {
             .build()
             .map_err(|e| EngineError::PipelineBuildFailed(format!("res capsfilter: {e}")))?;
 
-        let balance = gst::ElementFactory::make("videobalance")
-            .name("balance")
-            .property("brightness", 0.0f64)
-            .property("contrast", 1.0f64)
-            .property("saturation", 1.0f64)
-            .build()
-            .map_err(|e| EngineError::PipelineBuildFailed(format!("videobalance: {e}")))?;
+        // --- Effect stages from registry ---
 
-        let flip = gst::ElementFactory::make("videoflip")
-            .name("flip")
-            .property_from_str("method", "none")
-            .build()
-            .map_err(|e| EngineError::PipelineBuildFailed(format!("videoflip: {e}")))?;
+        let effect_elements = registry
+            .build_all_effect_elements()
+            .map_err(|e| EngineError::PipelineBuildFailed(e.to_string()))?;
+
+        // --- Output stage (hard-coded) ---
 
         let tee = gst::ElementFactory::make("tee")
             .name("t")
@@ -87,37 +82,22 @@ impl Pipeline {
             .build()
             .map_err(|e| EngineError::PipelineBuildFailed(format!("videoconvert: {e}")))?;
 
+        // --- Assemble the full chain ---
+
+        let mut chain: Vec<&gst::Element> =
+            vec![&src, &capsfilter, &convert1, &res_filter];
+        for el in &effect_elements {
+            chain.push(el);
+        }
+        chain.extend([&tee, &queue, &convert2, sink]);
+
         let pipeline = gst::Pipeline::default();
-        pipeline.add_many([
-            &src,
-            &capsfilter,
-            &convert1,
-            &res_filter,
-            &balance,
-            &flip,
-            &tee,
-            &queue,
-            &convert2,
-            sink,
-        ])?;
-        gst::Element::link_many([
-            &src,
-            &capsfilter,
-            &convert1,
-            &res_filter,
-            &balance,
-            &flip,
-            &tee,
-            &queue,
-            &convert2,
-            sink,
-        ])?;
+        pipeline.add_many(chain.iter().copied())?;
+        gst::Element::link_many(chain.iter().copied())?;
 
         Ok(Self {
             inner: pipeline,
             res_filter,
-            balance,
-            flip,
             sink_ref: sink.clone(),
             device_path: device_path.to_string(),
             vcam_bin: None,
@@ -135,24 +115,6 @@ impl Pipeline {
     pub fn stop(&self) -> Result<(), EngineError> {
         self.inner.set_state(gst::State::Null)?;
         Ok(())
-    }
-
-    /// Set brightness on the `videobalance` element (−1.0 to 1.0).
-    pub fn set_brightness(&self, value: f32) {
-        let clamped = value.clamp(-1.0, 1.0);
-        self.balance.set_property("brightness", clamped as f64);
-    }
-
-    /// Set contrast on the `videobalance` element (0.0 to 2.0).
-    pub fn set_contrast(&self, value: f32) {
-        let clamped = value.clamp(0.0, 2.0);
-        self.balance.set_property("contrast", clamped as f64);
-    }
-
-    /// Set saturation on the `videobalance` element (0.0 to 2.0).
-    pub fn set_saturation(&self, value: f32) {
-        let clamped = value.clamp(0.0, 2.0);
-        self.balance.set_property("saturation", clamped as f64);
     }
 
     /// Change capture resolution at runtime. Reverts on negotiation failure.
@@ -195,27 +157,12 @@ impl Pipeline {
         }
     }
 
-    /// Set the flip / rotation method on the `videoflip` element.
-    pub fn set_flip_method(&self, method: FlipMethod) {
-        self.flip
-            .set_property_from_str("method", method.as_gst_str());
-    }
-
     /// Returns the `gtk4paintablesink` paintable as an erased `glib::Object`.
-    ///
-    /// We return `glib::Object` rather than `gdk::Paintable` so that this
-    /// crate does not need a compile-time dependency on `gtk4` or `gdk`.
-    /// The caller (`lumalens-app`) performs the downcast after it has already
-    /// imported `gdk`.
     pub fn paintable(&self) -> gst::glib::Object {
         self.sink_ref.property("paintable")
     }
 
     /// Install a bus watch that forwards GStreamer errors to `on_error`.
-    ///
-    /// Resource errors from v4l2src (NotFound, Read, OpenRead, Close, Busy)
-    /// are mapped to [`EngineError::CameraDisconnected`]; everything else
-    /// becomes [`EngineError::PipelineBuildFailed`].
     pub fn install_bus_watch(&self, on_error: impl Fn(EngineError) + Send + Sync + 'static) {
         let bus = self.inner.bus().unwrap();
         let device_path = self.device_path.clone();
@@ -310,8 +257,6 @@ impl Pipeline {
                 None => return Ok(()),
             };
 
-            // Dynamic pipeline removal using blocking pad probes.
-            // https://gstreamer.freedesktop.org/documentation/application-development/advanced/pipeline-manipulation.html#dynamically-changing-the-pipeline
             let pipeline = self.inner.clone();
             let done = Arc::new((Mutex::new(false), Condvar::new()));
             let done_inner = Arc::clone(&done);
@@ -344,8 +289,7 @@ impl Pipeline {
         Ok(())
     }
 
-    /// Stop the pipeline and detach the shared sink so it can be reused in a
-    /// new pipeline.
+    /// Stop the pipeline and detach the shared sink so it can be reused.
     pub fn release_sink(&self, sink: &gst::Element) {
         let _ = self.inner.set_state(gst::State::Null);
         let _ = self.inner.state(Some(gst::ClockTime::from_seconds(3)));

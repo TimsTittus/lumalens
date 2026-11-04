@@ -12,6 +12,9 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use gstreamer as gst;
+use lumalens_effects::EffectRegistry;
+use lumalens_effects::correction::{BrightnessEffect, ContrastEffect, SaturationEffect};
+use lumalens_effects::transform::FlipEffect;
 use tracing::{debug, error, warn};
 
 use crate::camera;
@@ -69,10 +72,11 @@ fn emit(tx: &mpsc::Sender<EngineEvent>, event: EngineEvent) {
 fn build_pipeline(
     device: &str,
     sink: &gst::Element,
+    registry: &mut EffectRegistry,
     cmd_tx: &mpsc::SyncSender<EngineCommand>,
     event_tx: &mpsc::Sender<EngineEvent>,
 ) -> Option<Pipeline> {
-    match Pipeline::build(device, sink) {
+    match Pipeline::build(device, sink, registry) {
         Ok(pipe) => {
             let tx = Mutex::new(cmd_tx.clone());
             pipe.install_bus_watch(move |err| {
@@ -95,6 +99,7 @@ fn engine_loop(
     sink: gst::Element,
 ) {
     let mut pipeline: Option<Pipeline> = None;
+    let mut registry = EffectRegistry::with_defaults();
     let mut stashed: Option<EngineCommand> = None;
     let mut last_camera_count: usize = 0;
 
@@ -116,6 +121,7 @@ fn engine_loop(
                             &sink,
                             &cmd_tx,
                             &event_tx,
+                            &mut registry,
                             &mut pipeline,
                             &mut last_camera_count,
                         );
@@ -135,7 +141,8 @@ fn engine_loop(
                         Ok(cameras) => {
                             let device = cameras[0].device_path.clone();
                             emit(&event_tx, EngineEvent::CamerasDiscovered(cameras));
-                            pipeline = build_pipeline(&device, &sink, &cmd_tx, &event_tx);
+                            pipeline =
+                                build_pipeline(&device, &sink, &mut registry, &cmd_tx, &event_tx);
                         }
                         Err(e) => {
                             warn!("camera discovery failed: {e}");
@@ -173,7 +180,8 @@ fn engine_loop(
                     pipe.release_sink(&sink);
                 }
 
-                pipeline = build_pipeline(&device_path, &sink, &cmd_tx, &event_tx);
+                pipeline =
+                    build_pipeline(&device_path, &sink, &mut registry, &cmd_tx, &event_tx);
                 if let Some(ref pipe) = pipeline {
                     match pipe.start() {
                         Ok(()) => emit(&event_tx, EngineEvent::Started),
@@ -195,8 +203,8 @@ fn engine_loop(
                         }
                     }
                 }
-                if let Some(ref pipe) = pipeline {
-                    pipe.set_brightness(value);
+                if let Some(effect) = registry.effect_mut::<BrightnessEffect>("brightness") {
+                    effect.set_value(value as f64);
                 }
             }
 
@@ -210,8 +218,8 @@ fn engine_loop(
                         }
                     }
                 }
-                if let Some(ref pipe) = pipeline {
-                    pipe.set_contrast(value);
+                if let Some(effect) = registry.effect_mut::<ContrastEffect>("contrast") {
+                    effect.set_value(value as f64);
                 }
             }
 
@@ -225,14 +233,14 @@ fn engine_loop(
                         }
                     }
                 }
-                if let Some(ref pipe) = pipeline {
-                    pipe.set_saturation(value);
+                if let Some(effect) = registry.effect_mut::<SaturationEffect>("saturation") {
+                    effect.set_value(value as f64);
                 }
             }
 
             EngineCommand::SetFlip(method) => {
-                if let Some(ref pipe) = pipeline {
-                    pipe.set_flip_method(method);
+                if let Some(effect) = registry.effect_mut::<FlipEffect>("flip") {
+                    effect.set_method(method);
                 }
             }
 
@@ -273,6 +281,10 @@ fn engine_loop(
                 }
             }
 
+            EngineCommand::ReorderEffect { stage, from, to } => {
+                registry.reorder(stage, from, to);
+            }
+
             EngineCommand::BusError(err) => {
                 if pipeline.is_none() {
                     continue;
@@ -283,8 +295,6 @@ fn engine_loop(
                 }
                 pipeline = None;
 
-                // Drain stale BusError commands queued by the old pipeline's
-                // sync handler before we attempt re-discovery.
                 loop {
                     match cmd_rx.try_recv() {
                         Ok(EngineCommand::BusError(_)) => continue,
@@ -328,6 +338,7 @@ fn try_auto_discover(
     sink: &gst::Element,
     cmd_tx: &mpsc::SyncSender<EngineCommand>,
     event_tx: &mpsc::Sender<EngineEvent>,
+    registry: &mut EffectRegistry,
     pipeline: &mut Option<Pipeline>,
     last_camera_count: &mut usize,
 ) {
@@ -346,7 +357,7 @@ fn try_auto_discover(
 
     let device = cameras[0].device_path.clone();
 
-    let pipe = match Pipeline::build(&device, sink) {
+    let pipe = match Pipeline::build(&device, sink, registry) {
         Ok(p) => p,
         Err(e) => {
             warn!("auto-discover: pipeline build failed: {e}");
