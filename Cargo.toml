@@ -6,6 +6,7 @@ members = [
     "crates/lumalens-effects",
     "crates/lumalens-config",
     "crates/lumalens-common",
+    "crates/lumalens-ai",
 ]
 
 [workspace.package]
@@ -21,6 +22,7 @@ lumalens-common  = { path = "crates/lumalens-common" }
 lumalens-config  = { path = "crates/lumalens-config" }
 lumalens-effects = { path = "crates/lumalens-effects" }
 lumalens-engine  = { path = "crates/lumalens-engine" }
+lumalens-ai      = { path = "crates/lumalens-ai" }
 
 # Third-party
 gtk4              = { version = "~0.9",  features = ["v4_8"] }

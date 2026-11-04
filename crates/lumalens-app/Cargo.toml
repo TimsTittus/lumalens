@@ -9,11 +9,15 @@ rust-version.workspace = true
 name = "lumalens"
 path = "src/main.rs"
 
+[features]
+ai = ["lumalens-ai/ort"]
+
 [dependencies]
 lumalens-common  = { workspace = true }
 lumalens-config  = { workspace = true }
 lumalens-effects = { workspace = true }
 lumalens-engine  = { workspace = true }
+lumalens-ai      = { workspace = true, optional = true }
 gtk4             = { workspace = true }
 libadwaita       = { workspace = true }
 gstreamer        = { workspace = true }
