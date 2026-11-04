@@ -3,6 +3,7 @@
 
 pub mod preset;
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -55,6 +56,9 @@ pub struct Config {
     /// Virtual camera output state.
     #[serde(default)]
     pub virtual_camera: VirtualCameraSettings,
+    /// Per-stage effect ordering.
+    #[serde(default)]
+    pub effects: EffectsSettings,
 }
 
 impl Default for Config {
@@ -64,6 +68,7 @@ impl Default for Config {
             camera: CameraSettings::default(),
             image: ImageSettings::default(),
             virtual_camera: VirtualCameraSettings::default(),
+            effects: EffectsSettings::default(),
         }
     }
 }
@@ -148,6 +153,14 @@ pub struct VirtualCameraSettings {
     /// Whether the virtual camera was last enabled.
     #[serde(default)]
     pub enabled: bool,
+}
+
+/// Persisted per-stage effect ordering.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct EffectsSettings {
+    /// Maps stage name to ordered list of effect IDs.
+    #[serde(default)]
+    pub order: BTreeMap<String, Vec<String>>,
 }
 
 /// Load configuration from the default path.

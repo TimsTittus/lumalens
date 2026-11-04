@@ -84,8 +84,7 @@ impl Pipeline {
 
         // --- Assemble the full chain ---
 
-        let mut chain: Vec<&gst::Element> =
-            vec![&src, &capsfilter, &convert1, &res_filter];
+        let mut chain: Vec<&gst::Element> = vec![&src, &capsfilter, &convert1, &res_filter];
         for el in &effect_elements {
             chain.push(el);
         }

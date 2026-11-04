@@ -7,6 +7,7 @@
 //!   polls this with a `glib::timeout_add_local` source so that event handlers
 //!   can safely touch widgets without `Send` bounds.
 
+use std::collections::BTreeMap;
 use std::sync::{Mutex, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -45,14 +46,17 @@ impl Engine {
 }
 
 /// Start the engine on a dedicated thread, returning a handle and event receiver.
-pub fn spawn(sink: gst::Element) -> (Engine, mpsc::Receiver<EngineEvent>) {
+pub fn spawn(
+    sink: gst::Element,
+    effect_order: BTreeMap<String, Vec<String>>,
+) -> (Engine, mpsc::Receiver<EngineEvent>) {
     let (cmd_tx, cmd_rx) = mpsc::sync_channel::<EngineCommand>(32);
     let (event_tx, event_rx) = mpsc::channel::<EngineEvent>();
 
     let cmd_tx_clone = cmd_tx.clone();
     let handle = thread::Builder::new()
         .name("lumalens-engine".into())
-        .spawn(move || engine_loop(cmd_rx, cmd_tx_clone, event_tx, sink))
+        .spawn(move || engine_loop(cmd_rx, cmd_tx_clone, event_tx, sink, effect_order))
         .expect("failed to spawn engine thread");
 
     let engine = Engine {
@@ -97,9 +101,13 @@ fn engine_loop(
     cmd_tx: mpsc::SyncSender<EngineCommand>,
     event_tx: mpsc::Sender<EngineEvent>,
     sink: gst::Element,
+    effect_order: BTreeMap<String, Vec<String>>,
 ) {
     let mut pipeline: Option<Pipeline> = None;
     let mut registry = EffectRegistry::with_defaults();
+    if !effect_order.is_empty() {
+        registry.apply_order(&effect_order);
+    }
     let mut stashed: Option<EngineCommand> = None;
     let mut last_camera_count: usize = 0;
 
@@ -180,8 +188,7 @@ fn engine_loop(
                     pipe.release_sink(&sink);
                 }
 
-                pipeline =
-                    build_pipeline(&device_path, &sink, &mut registry, &cmd_tx, &event_tx);
+                pipeline = build_pipeline(&device_path, &sink, &mut registry, &cmd_tx, &event_tx);
                 if let Some(ref pipe) = pipeline {
                     match pipe.start() {
                         Ok(()) => emit(&event_tx, EngineEvent::Started),

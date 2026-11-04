@@ -50,6 +50,38 @@ impl Stage {
         Stage::Composition,
         Stage::Transform,
     ];
+
+    /// Config-file key for this stage.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Stage::Capture => "capture",
+            Stage::Correction => "correction",
+            Stage::Segmentation => "segmentation",
+            Stage::Composition => "composition",
+            Stage::Transform => "transform",
+            Stage::Encode => "encode",
+            Stage::Output => "output",
+        }
+    }
+
+    /// Human-readable label.
+    pub fn label(self) -> &'static str {
+        match self {
+            Stage::Capture => "Capture",
+            Stage::Correction => "Correction",
+            Stage::Segmentation => "Segmentation",
+            Stage::Composition => "Composition",
+            Stage::Transform => "Transform",
+            Stage::Encode => "Encode",
+            Stage::Output => "Output",
+        }
+    }
+}
+
+impl std::fmt::Display for Stage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.label())
+    }
 }
 
 /// Errors from effect element construction.
@@ -159,6 +191,32 @@ impl EffectRegistry {
 
         if from < stage_indices.len() && to < stage_indices.len() {
             self.effects.swap(stage_indices[from], stage_indices[to]);
+        }
+    }
+
+    /// Apply a saved effect order, reordering effects within each stage.
+    pub fn apply_order(&mut self, order: &BTreeMap<String, Vec<String>>) {
+        let mut by_stage: BTreeMap<Stage, Vec<Box<dyn Effect>>> = BTreeMap::new();
+
+        for effect in self.effects.drain(..) {
+            let stage = effect.stage();
+            by_stage.entry(stage).or_default().push(effect);
+        }
+
+        for (stage, effects) in &mut by_stage {
+            if let Some(ids) = order.get(stage.as_str()) {
+                effects.sort_by_key(|e| {
+                    ids.iter()
+                        .position(|saved| saved == e.id())
+                        .unwrap_or(usize::MAX)
+                });
+            }
+        }
+
+        for &stage in &Stage::ALL {
+            if let Some(effects) = by_stage.remove(&stage) {
+                self.effects.extend(effects);
+            }
         }
     }
 

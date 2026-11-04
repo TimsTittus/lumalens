@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 lumalens-common  = { workspace = true }
 lumalens-config  = { workspace = true }
+lumalens-effects = { workspace = true }
 lumalens-engine  = { workspace = true }
 gtk4             = { workspace = true }
 libadwaita       = { workspace = true }

@@ -935,6 +935,7 @@ dependencies = [
  "libadwaita",
  "lumalens-common",
  "lumalens-config",
+ "lumalens-effects",
  "lumalens-engine",
  "tracing",
  "tracing-subscriber",

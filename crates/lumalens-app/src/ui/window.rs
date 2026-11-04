@@ -20,6 +20,7 @@ use lumalens_engine::events::EngineEvent;
 use lumalens_engine::runtime;
 
 use super::controls::Controls;
+use super::effects_page;
 use super::preview::PreviewWidget;
 
 /// Build and return the primary application window.
@@ -46,7 +47,7 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
         .expect("gtk4paintablesink paintable must implement gdk::Paintable");
     preview.set_paintable(&paintable);
 
-    let (engine, event_rx) = runtime::spawn(sink);
+    let (engine, event_rx) = runtime::spawn(sink, config.borrow().effects.order.clone());
     let engine = Rc::new(RefCell::new(Some(engine)));
 
     let controls = Controls::new();
@@ -78,6 +79,29 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
 
     refresh_preset_dropdown(&controls.preset_dropdown, &presets);
 
+    // --- config save debounce ------------------------------------------------
+
+    let save_debounce: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+
+    let schedule_save = {
+        let config = Rc::clone(&config);
+        let debounce = Rc::clone(&save_debounce);
+        move || {
+            if let Some(id) = debounce.borrow_mut().take() {
+                id.remove();
+            }
+            let cfg = Rc::clone(&config);
+            let deb = Rc::clone(&debounce);
+            let id = glib::timeout_add_local_once(Duration::from_millis(500), move || {
+                deb.borrow_mut().take();
+                if let Err(e) = lumalens_config::save(&cfg.borrow()) {
+                    warn!("failed to save config: {e}");
+                }
+            });
+            debounce.borrow_mut().replace(id);
+        }
+    };
+
     let camera_row = controls.camera_row.clone();
     let resolution_dropdown = controls.resolution_dropdown.clone();
     let brightness_scale = controls.brightness.clone();
@@ -99,10 +123,42 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
     sidebar_box.append(&controls.preset_group);
     sidebar_box.append(&controls.output_group);
 
-    let sidebar = gtk::ScrolledWindow::builder()
+    let effects_nav_row = adw::ActionRow::builder()
+        .title("Effects Order")
+        .activatable(true)
+        .build();
+    effects_nav_row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+    let effects_nav_group = adw::PreferencesGroup::new();
+    effects_nav_group.add(&effects_nav_row);
+    sidebar_box.append(&effects_nav_group);
+
+    let sidebar_scroll = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .child(&sidebar_box)
         .build();
+
+    let controls_page = adw::NavigationPage::builder()
+        .title("Controls")
+        .tag("controls")
+        .child(&sidebar_scroll)
+        .build();
+
+    let effects_page = effects_page::build(
+        Rc::clone(&engine),
+        Rc::clone(&config),
+        schedule_save.clone(),
+    );
+
+    let nav_view = adw::NavigationView::new();
+    nav_view.add(&controls_page);
+
+    {
+        let nv = nav_view.clone();
+        let ep = effects_page.clone();
+        effects_nav_row.connect_activated(move |_| {
+            nv.push(&ep);
+        });
+    }
 
     // --- content -------------------------------------------------------------
 
@@ -137,7 +193,7 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
 
     let split_view = adw::OverlaySplitView::builder()
         .content(&toolbar_view)
-        .sidebar(&sidebar)
+        .sidebar(&nav_view)
         .show_sidebar(true)
         .min_sidebar_width(280.0)
         .max_sidebar_width(360.0)
@@ -156,29 +212,6 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
         .default_height(720)
         .content(&split_view)
         .build();
-
-    // --- config save debounce ------------------------------------------------
-
-    let save_debounce: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
-
-    let schedule_save = {
-        let config = Rc::clone(&config);
-        let debounce = Rc::clone(&save_debounce);
-        move || {
-            if let Some(id) = debounce.borrow_mut().take() {
-                id.remove();
-            }
-            let cfg = Rc::clone(&config);
-            let deb = Rc::clone(&debounce);
-            let id = glib::timeout_add_local_once(Duration::from_millis(500), move || {
-                deb.borrow_mut().take();
-                if let Err(e) = lumalens_config::save(&cfg.borrow()) {
-                    warn!("failed to save config: {e}");
-                }
-            });
-            debounce.borrow_mut().replace(id);
-        }
-    };
 
     // --- camera dropdown signal ----------------------------------------------
 
