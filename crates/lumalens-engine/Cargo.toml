@@ -15,4 +15,5 @@ thiserror        = { workspace = true }
 tracing          = { workspace = true }
 
 [features]
+ai = ["lumalens-effects/ai"]
 live-hardware = []

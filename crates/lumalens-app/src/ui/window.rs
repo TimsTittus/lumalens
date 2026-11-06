@@ -47,7 +47,17 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
         .expect("gtk4paintablesink paintable must implement gdk::Paintable");
     preview.set_paintable(&paintable);
 
-    let (engine, event_rx) = runtime::spawn(sink, config.borrow().effects.order.clone());
+    let blur_enabled = {
+        #[cfg(feature = "ai")]
+        {
+            config.borrow().ai.background_blur
+        }
+        #[cfg(not(feature = "ai"))]
+        {
+            false
+        }
+    };
+    let (engine, event_rx) = runtime::spawn(sink, config.borrow().effects.order.clone(), blur_enabled);
     let engine = Rc::new(RefCell::new(Some(engine)));
 
     let controls = Controls::new();
@@ -64,6 +74,8 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
             .position(|&m| m == cfg.image.flip)
             .unwrap_or(0);
         controls.flip_dropdown.set_selected(flip_idx as u32);
+        #[cfg(feature = "ai")]
+        controls.blur_switch.set_active(cfg.ai.background_blur);
     }
 
     // --- populate preset dropdown --------------------------------------------
@@ -122,6 +134,9 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
     sidebar_box.append(&controls.root);
     sidebar_box.append(&controls.preset_group);
     sidebar_box.append(&controls.output_group);
+
+    #[cfg(feature = "ai")]
+    sidebar_box.append(&controls.ai_group);
 
     let effects_nav_row = adw::ActionRow::builder()
         .title("Effects Order")
@@ -431,6 +446,26 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
                 glib::Propagation::Proceed
             }
         });
+
+    // --- background blur switch (AI feature) --------------------------------
+
+    #[cfg(feature = "ai")]
+    {
+        let eng = Rc::clone(&engine);
+        let cfg = Rc::clone(&config);
+        let sched = schedule_save.clone();
+
+        controls
+            .blur_switch
+            .connect_state_set(move |_switch, state| {
+                cfg.borrow_mut().ai.background_blur = state;
+                sched();
+                if let Some(ref e) = *eng.borrow() {
+                    e.send(EngineCommand::EnableBackgroundBlur(state));
+                }
+                glib::Propagation::Proceed
+            });
+    }
 
     // --- preset: Apply -------------------------------------------------------
 

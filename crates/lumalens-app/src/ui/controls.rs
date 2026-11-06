@@ -21,6 +21,10 @@ pub struct Controls {
     pub apply_preset_btn: gtk::Button,
     pub save_preset_btn: gtk::Button,
     pub delete_preset_btn: gtk::Button,
+    #[cfg(feature = "ai")]
+    pub ai_group: adw::PreferencesGroup,
+    #[cfg(feature = "ai")]
+    pub blur_switch: gtk::Switch,
 }
 
 impl Controls {
@@ -129,6 +133,22 @@ impl Controls {
         preset_group.add(&preset_dropdown);
         preset_group.add(&btn_box);
 
+        #[cfg(feature = "ai")]
+        let blur_switch = gtk::Switch::builder().valign(gtk::Align::Center).build();
+        #[cfg(feature = "ai")]
+        let ai_group = {
+            let row = adw::ActionRow::builder()
+                .title("Background Blur")
+                .build();
+            row.add_suffix(&blur_switch);
+            row.set_activatable_widget(Some(&blur_switch));
+            let group = adw::PreferencesGroup::builder()
+                .title("AI Effects")
+                .build();
+            group.add(&row);
+            group
+        };
+
         Self {
             root,
             output_group,
@@ -144,6 +164,10 @@ impl Controls {
             apply_preset_btn,
             save_preset_btn,
             delete_preset_btn,
+            #[cfg(feature = "ai")]
+            ai_group,
+            #[cfg(feature = "ai")]
+            blur_switch,
         }
     }
 }

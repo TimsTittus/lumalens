@@ -1,29 +1,30 @@
 use std::sync::Mutex;
 
-use ort::session::{Session, builder::SessionBuilder};
+use ort::session::builder::SessionBuilder;
 
 use crate::error::AiError;
-use crate::model_registry::{ModelInfo, model_path};
+use crate::model_registry::ModelInfo;
 use crate::{Mask, VideoFrame};
+
+// Embedded at compile time by build.rs — always present, no runtime download.
+static MODEL_BYTES: &[u8] = include_bytes!(concat!(
+    env!("OUT_DIR"),
+    "/selfie-segmentation.onnx"
+));
 
 /// A loaded ONNX segmentation model, ready for inference.
 pub struct SegmentationModel {
-    session: Mutex<Session>,
+    session: Mutex<ort::session::Session>,
     input_size: (u32, u32),
 }
 
-/// Loads a model from disk into an ONNX Runtime session.
+/// Loads the embedded model into an ONNX Runtime session.
 ///
-/// Returns [`AiError::NotDownloaded`] if the file is missing.
-pub fn load(info: &ModelInfo) -> Result<SegmentationModel, AiError> {
-    let path = model_path(info);
-    if !path.is_file() {
-        return Err(AiError::NotDownloaded(info.id.to_string()));
-    }
-
+/// The model is compiled into the binary by `build.rs`; no file I/O occurs.
+pub fn load(_info: &ModelInfo) -> Result<SegmentationModel, AiError> {
     let env = ort::init().build()?;
     let mut builder = SessionBuilder::new(&env)?;
-    let session = builder.commit_from_file(&path)?;
+    let session = builder.commit_from_memory(MODEL_BYTES)?;
 
     Ok(SegmentationModel {
         session: Mutex::new(session),
@@ -36,27 +37,30 @@ pub fn segment(model: &SegmentationModel, frame: &VideoFrame) -> Result<Mask, Ai
     let (in_w, in_h) = model.input_size;
     let in_pixels = (in_w * in_h) as usize;
 
-    let mut rgb = vec![0.0f32; in_pixels * 3];
+    // NCHW layout: [1, 3, 256, 256], float32 in [0, 1]
+    let mut nchw = vec![0.0f32; in_pixels * 3];
+    let plane_size = in_pixels;
     for y in 0..in_h {
         for x in 0..in_w {
             let src_x = (x as u64 * frame.width as u64 / in_w as u64) as usize;
             let src_y = (y as u64 * frame.height as u64 / in_h as u64) as usize;
-            let src_idx = (src_y * frame.width as usize + src_x) * 4;
-            let dst_idx = (y as usize * in_w as usize + x as usize) * 3;
-            rgb[dst_idx] = frame.data[src_idx] as f32 / 255.0;
-            rgb[dst_idx + 1] = frame.data[src_idx + 1] as f32 / 255.0;
-            rgb[dst_idx + 2] = frame.data[src_idx + 2] as f32 / 255.0;
+            let src_idx = (src_y * frame.width as usize + src_x) * 4; // RGBA
+            let pixel = y as usize * in_w as usize + x as usize;
+            nchw[pixel] = frame.data[src_idx] as f32 / 255.0;                     // R plane
+            nchw[plane_size + pixel] = frame.data[src_idx + 1] as f32 / 255.0;    // G plane
+            nchw[2 * plane_size + pixel] = frame.data[src_idx + 2] as f32 / 255.0; // B plane
         }
     }
 
     let input = ort::value::Tensor::from_array((
-        [1usize, in_h as usize, in_w as usize, 3],
-        rgb.into_boxed_slice(),
+        [1usize, 3, in_h as usize, in_w as usize],
+        nchw.into_boxed_slice(),
     ))?;
 
     let mut session = model.session.lock().expect("session lock poisoned");
     let outputs = session.run(ort::inputs![input])?;
 
+    // Output: [1, 1, 256, 256] alpha matte, float32 in [0, 1]
     let (_shape, raw) = outputs[0].try_extract_tensor::<f32>()?;
 
     let out_pixels = (frame.width * frame.height) as usize;

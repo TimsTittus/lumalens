@@ -41,6 +41,9 @@ pub enum EngineCommand {
         /// Destination position within the stage.
         to: usize,
     },
+    /// Enable or disable AI background blur (requires pipeline rebuild).
+    #[cfg(feature = "ai")]
+    EnableBackgroundBlur(bool),
     /// Shut down the engine thread.
     Shutdown,
     /// Internal: forwarded from the pipeline bus watch.

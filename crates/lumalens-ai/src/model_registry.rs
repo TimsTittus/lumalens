@@ -17,11 +17,11 @@ pub struct ModelInfo {
 }
 
 static MODELS: &[ModelInfo] = &[ModelInfo {
-    id: "mediapipe-selfie-small",
-    display_name: "MediaPipe Selfie Segmentation (small)",
-    url: "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite",
-    sha256: "b0e6d012dbb949a63df87e5e0fea3e5a32e6b3e26abb64e256a4974d55546454",
-    size_bytes: 262_112,
+    id: "selfie-segmentation",
+    display_name: "Selfie Segmentation (MobileNetV3)",
+    url: "https://huggingface.co/onnx-community/selfie_segmentation/resolve/main/onnx/model.onnx",
+    sha256: "3241ac4ad8aa35bdaf33946776db29f7c283a413aa0b0dacb9483594b4531aad",
+    size_bytes: 462_688,
     license: "Apache-2.0",
 }];
 

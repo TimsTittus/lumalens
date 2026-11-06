@@ -288,6 +288,11 @@ impl Pipeline {
         Ok(())
     }
 
+    /// The device path this pipeline was built for.
+    pub fn device_path(&self) -> &str {
+        &self.device_path
+    }
+
     /// Stop the pipeline and detach the shared sink so it can be reused.
     pub fn release_sink(&self, sink: &gst::Element) {
         let _ = self.inner.set_state(gst::State::Null);

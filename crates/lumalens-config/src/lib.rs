@@ -59,6 +59,9 @@ pub struct Config {
     /// Per-stage effect ordering.
     #[serde(default)]
     pub effects: EffectsSettings,
+    /// AI-powered effect settings.
+    #[serde(default)]
+    pub ai: AiSettings,
 }
 
 impl Default for Config {
@@ -69,6 +72,7 @@ impl Default for Config {
             image: ImageSettings::default(),
             virtual_camera: VirtualCameraSettings::default(),
             effects: EffectsSettings::default(),
+            ai: AiSettings::default(),
         }
     }
 }
@@ -161,6 +165,24 @@ pub struct EffectsSettings {
     /// Maps stage name to ordered list of effect IDs.
     #[serde(default)]
     pub order: BTreeMap<String, Vec<String>>,
+}
+
+/// Persisted AI effect settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiSettings {
+    /// Whether background blur is enabled.
+    #[serde(default = "default_true")]
+    pub background_blur: bool,
+}
+
+impl Default for AiSettings {
+    fn default() -> Self {
+        Self { background_blur: true }
+    }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Load configuration from the default path.

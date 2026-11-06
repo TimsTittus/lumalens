@@ -4,10 +4,92 @@
 pub mod correction;
 pub mod transform;
 
+#[cfg(feature = "ai")]
+mod segmentation;
+#[cfg(feature = "ai")]
+mod background_blur;
+
+#[cfg(feature = "ai")]
+pub use segmentation::SegmentationEffect;
+#[cfg(feature = "ai")]
+pub use background_blur::BackgroundBlurEffect;
+
 use std::any::Any;
 use std::collections::BTreeMap;
 
 use gstreamer as gst;
+
+// ---------------------------------------------------------------------------
+// SharedMask — thread-safe latest-mask buffer shared between AI effects
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "ai")]
+use std::sync::Mutex;
+#[cfg(feature = "ai")]
+use std::time::Instant;
+
+/// Thread-safe container for the latest segmentation mask, shared between
+/// [`SegmentationEffect`] (writer) and [`BackgroundBlurEffect`] (reader).
+#[cfg(feature = "ai")]
+pub struct SharedMask {
+    inner: Mutex<MaskState>,
+}
+
+#[cfg(feature = "ai")]
+struct MaskState {
+    data: Vec<u8>,
+    width: u32,
+    height: u32,
+    updated_at: Option<Instant>,
+}
+
+#[cfg(feature = "ai")]
+impl SharedMask {
+    /// Create an empty shared mask.
+    pub fn new() -> Self {
+        Self {
+            inner: Mutex::new(MaskState {
+                data: Vec::new(),
+                width: 0,
+                height: 0,
+                updated_at: None,
+            }),
+        }
+    }
+
+    /// Replace the mask data (called from the inference thread).
+    pub fn update(&self, data: Vec<u8>, width: u32, height: u32) {
+        let mut state = self.inner.lock().unwrap();
+        state.data = data;
+        state.width = width;
+        state.height = height;
+        state.updated_at = Some(Instant::now());
+    }
+
+    /// Read the latest mask. Returns `None` if no mask has been produced yet.
+    pub fn get(&self) -> Option<(Vec<u8>, u32, u32, Instant)> {
+        let state = self.inner.lock().unwrap();
+        state
+            .updated_at
+            .map(|t| (state.data.clone(), state.width, state.height, t))
+    }
+
+    /// Clear the mask (e.g. when the effect is disabled).
+    pub fn clear(&self) {
+        let mut state = self.inner.lock().unwrap();
+        state.data.clear();
+        state.width = 0;
+        state.height = 0;
+        state.updated_at = None;
+    }
+}
+
+#[cfg(feature = "ai")]
+impl Default for SharedMask {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Fixed stage order for the effect pipeline.
 ///

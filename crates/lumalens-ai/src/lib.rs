@@ -1,6 +1,8 @@
 #![warn(missing_docs)]
 //! AI-powered segmentation for LumaLens.
 //!
+//! The segmentation model is embedded at compile time by `build.rs`
+//! (downloaded once into `models/` next to the crate, then bundled).
 //! All ONNX inference code lives behind the `ort` feature gate.
 
 mod model_registry;

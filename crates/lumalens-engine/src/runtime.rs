@@ -16,6 +16,8 @@ use gstreamer as gst;
 use lumalens_effects::EffectRegistry;
 use lumalens_effects::correction::{BrightnessEffect, ContrastEffect, SaturationEffect};
 use lumalens_effects::transform::FlipEffect;
+#[cfg(feature = "ai")]
+use lumalens_effects::{BackgroundBlurEffect, Effect, SegmentationEffect, SharedMask};
 use tracing::{debug, error, warn};
 
 use crate::camera;
@@ -46,9 +48,13 @@ impl Engine {
 }
 
 /// Start the engine on a dedicated thread, returning a handle and event receiver.
+///
+/// `background_blur` is only used when the `ai` feature is enabled; it
+/// controls whether the AI segmentation + blur effects start enabled.
 pub fn spawn(
     sink: gst::Element,
     effect_order: BTreeMap<String, Vec<String>>,
+    _background_blur: bool,
 ) -> (Engine, mpsc::Receiver<EngineEvent>) {
     let (cmd_tx, cmd_rx) = mpsc::sync_channel::<EngineCommand>(32);
     let (event_tx, event_rx) = mpsc::channel::<EngineEvent>();
@@ -56,7 +62,9 @@ pub fn spawn(
     let cmd_tx_clone = cmd_tx.clone();
     let handle = thread::Builder::new()
         .name("lumalens-engine".into())
-        .spawn(move || engine_loop(cmd_rx, cmd_tx_clone, event_tx, sink, effect_order))
+        .spawn(move || {
+            engine_loop(cmd_rx, cmd_tx_clone, event_tx, sink, effect_order, _background_blur)
+        })
         .expect("failed to spawn engine thread");
 
     let engine = Engine {
@@ -102,9 +110,22 @@ fn engine_loop(
     event_tx: mpsc::Sender<EngineEvent>,
     sink: gst::Element,
     effect_order: BTreeMap<String, Vec<String>>,
+    _background_blur: bool,
 ) {
     let mut pipeline: Option<Pipeline> = None;
     let mut registry = EffectRegistry::with_defaults();
+
+    #[cfg(feature = "ai")]
+    {
+        let mask = std::sync::Arc::new(SharedMask::new());
+        let mut seg = SegmentationEffect::new(mask.clone());
+        let mut blur = BackgroundBlurEffect::new(mask);
+        seg.set_enabled(_background_blur);
+        blur.set_enabled(_background_blur);
+        registry.register(Box::new(seg));
+        registry.register(Box::new(blur));
+    }
+
     if !effect_order.is_empty() {
         registry.apply_order(&effect_order);
     }
@@ -290,6 +311,31 @@ fn engine_loop(
 
             EngineCommand::ReorderEffect { stage, from, to } => {
                 registry.reorder(stage, from, to);
+            }
+
+            #[cfg(feature = "ai")]
+            EngineCommand::EnableBackgroundBlur(enabled) => {
+                if let Some(e) = registry.effect_mut::<SegmentationEffect>("segmentation") {
+                    e.set_enabled(enabled);
+                }
+                if let Some(e) = registry.effect_mut::<BackgroundBlurEffect>("background_blur") {
+                    e.set_enabled(enabled);
+                }
+                if let Some(ref pipe) = pipeline {
+                    let device = pipe.device_path().to_string();
+                    pipe.release_sink(&sink);
+                    pipeline =
+                        build_pipeline(&device, &sink, &mut registry, &cmd_tx, &event_tx);
+                    if let Some(ref pipe) = pipeline {
+                        match pipe.start() {
+                            Ok(()) => emit(&event_tx, EngineEvent::Started),
+                            Err(e) => {
+                                warn!("pipeline rebuild for background blur failed: {e}");
+                                emit(&event_tx, EngineEvent::Error(e.to_string()));
+                            }
+                        }
+                    }
+                }
             }
 
             EngineCommand::BusError(err) => {

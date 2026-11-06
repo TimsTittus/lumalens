@@ -26,5 +26,8 @@ Thumbs.db
 # Flatpak
 packaging/flatpak/cargo-vendor/
 
+# AI model cache (downloaded once at build time, re-fetched if missing)
+crates/lumalens-ai/models/
+
 # Logs
 *.log
