@@ -1,10 +1,24 @@
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
+use ort::environment::Environment;
 use ort::session::builder::SessionBuilder;
 
 use crate::error::AiError;
 use crate::model_registry::ModelInfo;
 use crate::{Mask, VideoFrame};
+
+// ort allows only one Environment per process; cache it so re-enabling
+// the effect reuses the existing one instead of failing to re-init.
+static ORT_ENV: OnceLock<Environment> = OnceLock::new();
+
+fn global_env() -> Result<&'static Environment, AiError> {
+    if let Some(env) = ORT_ENV.get() {
+        return Ok(env);
+    }
+    let env = ort::init().build()?;
+    let _ = ORT_ENV.set(env);
+    Ok(ORT_ENV.get().expect("ORT_ENV set above"))
+}
 
 // Embedded at compile time by build.rs — always present, no runtime download.
 static MODEL_BYTES: &[u8] = include_bytes!(concat!(
@@ -22,8 +36,8 @@ pub struct SegmentationModel {
 ///
 /// The model is compiled into the binary by `build.rs`; no file I/O occurs.
 pub fn load(_info: &ModelInfo) -> Result<SegmentationModel, AiError> {
-    let env = ort::init().build()?;
-    let mut builder = SessionBuilder::new(&env)?;
+    let env = global_env()?;
+    let mut builder = SessionBuilder::new(env)?;
     let session = builder.commit_from_memory(MODEL_BYTES)?;
 
     Ok(SegmentationModel {
