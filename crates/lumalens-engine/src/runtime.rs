@@ -10,7 +10,7 @@
 use std::collections::BTreeMap;
 use std::sync::{Mutex, mpsc};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gstreamer as gst;
 use lumalens_effects::EffectRegistry;
@@ -131,6 +131,7 @@ fn engine_loop(
     }
     let mut stashed: Option<EngineCommand> = None;
     let mut last_camera_count: usize = 0;
+    let mut last_metrics_tick = Instant::now();
 
     loop {
         let timeout = if pipeline.is_none() {
@@ -162,6 +163,14 @@ fn engine_loop(
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
         };
+
+        if last_metrics_tick.elapsed() >= Duration::from_millis(500) {
+            if let Some(ref pipe) = pipeline {
+                let m = pipe.metrics_probes.snapshot();
+                emit(&event_tx, EngineEvent::MetricsUpdated(m));
+            }
+            last_metrics_tick = Instant::now();
+        }
 
         match cmd {
             EngineCommand::Start => {

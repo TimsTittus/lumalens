@@ -20,6 +20,7 @@ use lumalens_engine::events::EngineEvent;
 use lumalens_engine::runtime;
 
 use super::controls::Controls;
+use super::diagnostics::DiagnosticsPanel;
 use super::effects_page;
 use super::preview::PreviewWidget;
 
@@ -183,8 +184,14 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
         .tooltip_text("Toggle sidebar")
         .build();
 
+    let diag_btn = gtk::Button::builder()
+        .icon_name("utilities-system-monitor-symbolic")
+        .tooltip_text("Diagnostics (Ctrl+Shift+D)")
+        .build();
+
     let header = adw::HeaderBar::new();
     header.pack_start(&sidebar_btn);
+    header.pack_end(&diag_btn);
 
     let status_page = adw::StatusPage::builder()
         .icon_name("camera-disabled-symbolic")
@@ -227,6 +234,32 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
         .default_height(720)
         .content(&split_view)
         .build();
+
+    // --- diagnostics panel (Ctrl+Alt+D) ------------------------------------
+
+    let diag = Rc::new(DiagnosticsPanel::new(&window));
+
+    {
+        let d = Rc::clone(&diag);
+        diag_btn.connect_clicked(move |_| {
+            d.toggle();
+        });
+    }
+
+    {
+        let d = Rc::clone(&diag);
+        let controller = gtk::EventControllerKey::new();
+        controller.connect_key_pressed(move |_ctrl, key, _code, modifiers| {
+            // Ctrl+Shift+D — Ctrl+Alt+D conflicts with GNOME "Show Desktop"
+            let want = gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK;
+            if key == gdk::Key::D && modifiers.contains(want) {
+                d.toggle();
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+        window.add_controller(controller);
+    }
 
     // --- camera dropdown signal ----------------------------------------------
 
@@ -624,6 +657,7 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
     let res_dd_for_start = controls.resolution_dropdown.clone();
     let avail_res_for_start = Rc::clone(&available_resolutions);
     let cfg_for_start = Rc::clone(&config);
+    let diag = Rc::clone(&diag);
     glib::timeout_add_local(Duration::from_millis(16), move || {
         while let Ok(event) = event_rx.try_recv() {
             match event {
@@ -720,6 +754,9 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
                     let t = adw::Toast::new(&msg);
                     t.set_timeout(5);
                     toast.add_toast(t);
+                }
+                EngineEvent::MetricsUpdated(m) => {
+                    diag.update(&m);
                 }
             }
         }

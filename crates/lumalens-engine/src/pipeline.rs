@@ -1,15 +1,39 @@
 //! GStreamer pipeline management.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
+use std::time::Instant;
 
 use gstreamer as gst;
 use gstreamer::prelude::*;
 use lumalens_effects::EffectRegistry;
 
 use crate::errors::EngineError;
+use crate::events::Metrics;
 
 /// Pixel format negotiated with the v4l2loopback virtual camera.
 pub const VIRTUAL_CAM_FORMAT: &str = "YUY2";
+
+/// Shared counters written by pad probes, read by the metrics timer.
+pub(crate) struct MetricsProbes {
+    pub input_count: AtomicU64,
+    pub output_count: AtomicU64,
+    pub last_tick: Mutex<Instant>,
+    pub processing_ns: AtomicU64,
+    pub processing_samples: AtomicU64,
+}
+
+impl MetricsProbes {
+    fn new() -> Self {
+        Self {
+            input_count: AtomicU64::new(0),
+            output_count: AtomicU64::new(0),
+            last_tick: Mutex::new(Instant::now()),
+            processing_ns: AtomicU64::new(0),
+            processing_samples: AtomicU64::new(0),
+        }
+    }
+}
 
 /// Owns and drives the GStreamer pipeline for a camera session.
 ///
@@ -24,6 +48,7 @@ pub struct Pipeline {
     device_path: String,
     vcam_bin: Option<gst::Bin>,
     vcam_tee_pad: Option<gst::Pad>,
+    pub(crate) metrics_probes: Arc<MetricsProbes>,
 }
 
 impl Pipeline {
@@ -94,6 +119,57 @@ impl Pipeline {
         pipeline.add_many(chain.iter().copied())?;
         gst::Element::link_many(chain.iter().copied())?;
 
+        let probes = Arc::new(MetricsProbes::new());
+
+        // Pad probe on the source's src pad — counts input frames.
+        if let Some(pad) = src.static_pad("src") {
+            let p = Arc::clone(&probes);
+            pad.add_probe(gst::PadProbeType::BUFFER, move |_pad, _info| {
+                p.input_count.fetch_add(1, Ordering::Relaxed);
+                gst::PadProbeReturn::Ok
+            });
+        }
+
+        // Pad probe on the sink's sink pad — counts output frames and
+        // measures the processing span (source → sink).
+        if let Some(pad) = sink.static_pad("sink") {
+            let p = Arc::clone(&probes);
+            pad.add_probe(gst::PadProbeType::BUFFER, move |_pad, _info| {
+                p.output_count.fetch_add(1, Ordering::Relaxed);
+                gst::PadProbeReturn::Ok
+            });
+        }
+
+        // Probes on the effect span: before first effect element → after
+        // last effect element, measuring wall-clock processing time.
+        // Frames flow sequentially, so a shared atomic timestamp is safe.
+        if !effect_elements.is_empty() {
+            let first = &effect_elements[0];
+            let last = &effect_elements[effect_elements.len() - 1];
+            let enter_ns: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
+            if let Some(pad) = first.static_pad("sink") {
+                let ts = Arc::clone(&enter_ns);
+                pad.add_probe(gst::PadProbeType::BUFFER, move |_pad, _info| {
+                    ts.store(nanos_now(), Ordering::Release);
+                    gst::PadProbeReturn::Ok
+                });
+            }
+            if let Some(pad) = last.static_pad("src") {
+                let ts = Arc::clone(&enter_ns);
+                let p = Arc::clone(&probes);
+                pad.add_probe(gst::PadProbeType::BUFFER, move |_pad, _info| {
+                    let entered = ts.load(Ordering::Acquire);
+                    if entered != 0 {
+                        let now = nanos_now();
+                        let elapsed = now.saturating_sub(entered);
+                        p.processing_ns.fetch_add(elapsed, Ordering::Relaxed);
+                        p.processing_samples.fetch_add(1, Ordering::Relaxed);
+                    }
+                    gst::PadProbeReturn::Ok
+                });
+            }
+        }
+
         Ok(Self {
             inner: pipeline,
             res_filter,
@@ -101,6 +177,7 @@ impl Pipeline {
             device_path: device_path.to_string(),
             vcam_bin: None,
             vcam_tee_pad: None,
+            metrics_probes: probes,
         })
     }
 
@@ -298,6 +375,45 @@ impl Pipeline {
         let _ = self.inner.set_state(gst::State::Null);
         let _ = self.inner.state(Some(gst::ClockTime::from_seconds(3)));
         let _ = self.inner.remove(sink);
+    }
+}
+
+/// Monotonic nanosecond timestamp (relative to an arbitrary epoch).
+fn nanos_now() -> u64 {
+    static EPOCH: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    let epoch = EPOCH.get_or_init(Instant::now);
+    epoch.elapsed().as_nanos() as u64
+}
+
+impl MetricsProbes {
+    /// Snapshot current counters and reset them for the next interval.
+    pub fn snapshot(&self) -> Metrics {
+        let mut last = self.last_tick.lock().unwrap();
+        let elapsed = last.elapsed();
+        *last = Instant::now();
+
+        let elapsed_secs = elapsed.as_secs_f32().max(0.001);
+        let in_count = self.input_count.swap(0, Ordering::Relaxed);
+        let out_count = self.output_count.swap(0, Ordering::Relaxed);
+
+        let proc_ns = self.processing_ns.swap(0, Ordering::Relaxed);
+        let proc_samples = self.processing_samples.swap(0, Ordering::Relaxed);
+        let processing_ms = if proc_samples > 0 {
+            (proc_ns as f32 / proc_samples as f32) / 1_000_000.0
+        } else {
+            0.0
+        };
+
+        Metrics {
+            input_fps: in_count as f32 / elapsed_secs,
+            output_fps: out_count as f32 / elapsed_secs,
+            dropped_frames: in_count.saturating_sub(out_count),
+            processing_ms,
+            queue_depth_preview: 0,
+            queue_depth_virtual: 0,
+            ai_inference_ms: None,
+            ai_mask_age_ms: None,
+        }
     }
 }
 
