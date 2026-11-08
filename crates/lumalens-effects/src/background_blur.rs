@@ -14,8 +14,13 @@ use gstreamer_video as gst_video;
 
 use crate::{Effect, EffectError, SharedMask, Stage};
 
-const BLUR_RADIUS: usize = 12;
-const BLUR_PASSES: usize = 3;
+// Blur a downsampled copy of the frame then sample from it when
+// compositing. At DOWNSCALE=4 the blur pass does ~16× less work, and the
+// effective blur radius is multiplied by DOWNSCALE for free, so we can
+// keep the same visual strength with a smaller kernel and fewer passes.
+const DOWNSCALE: usize = 4;
+const BLUR_RADIUS: usize = 3;
+const BLUR_PASSES: usize = 2;
 
 /// Blurs the background of camera frames using the segmentation mask
 /// produced by [`SegmentationEffect`](super::SegmentationEffect).
@@ -151,24 +156,31 @@ fn composite_with_blur(
         return original.to_vec();
     }
 
-    let blurred = blur_frame(original, w, h);
+    // Blur runs on a 1/DOWNSCALE copy; upscaling happens implicitly when
+    // we sample it below.
+    let sw = (w / DOWNSCALE).max(1);
+    let sh = (h / DOWNSCALE).max(1);
+    let blurred_small = blur_frame_small(original, w, h, sw, sh);
 
     let mut output = vec![0u8; pixel_count];
     for y in 0..h {
+        let my = y * mask_h / h;
+        let sy = y * sh / h;
         for x in 0..w {
             let px = (y * w + x) * 4;
             let mx = x * mask_w / w;
-            let my = y * mask_h / h;
             let alpha = mask[my * mask_w + mx] as u32;
             let inv = 255 - alpha;
+            let sx = x * sw / w;
+            let bpx = (sy * sw + sx) * 3;
             output[px] =
-                ((original[px] as u32 * alpha + blurred[px] as u32 * inv + 127) / 255) as u8;
+                ((original[px] as u32 * alpha + blurred_small[bpx] as u32 * inv + 127) / 255) as u8;
             output[px + 1] = ((original[px + 1] as u32 * alpha
-                + blurred[px + 1] as u32 * inv
+                + blurred_small[bpx + 1] as u32 * inv
                 + 127)
                 / 255) as u8;
             output[px + 2] = ((original[px + 2] as u32 * alpha
-                + blurred[px + 2] as u32 * inv
+                + blurred_small[bpx + 2] as u32 * inv
                 + 127)
                 / 255) as u8;
             output[px + 3] = original[px + 3];
@@ -177,13 +189,24 @@ fn composite_with_blur(
     output
 }
 
-fn blur_frame(original: &[u8], w: usize, h: usize) -> Vec<u8> {
-    let len = w * h * 4;
-    let mut a = original[..len].to_vec();
-    let mut b = vec![0u8; len];
+// Downsample RGBA → RGB at (sw, sh) using nearest sampling, then box-blur.
+fn blur_frame_small(original: &[u8], w: usize, h: usize, sw: usize, sh: usize) -> Vec<u8> {
+    let mut a = vec![0u8; sw * sh * 3];
+    for y in 0..sh {
+        let sy = y * h / sh;
+        for x in 0..sw {
+            let sx = x * w / sw;
+            let src = (sy * w + sx) * 4;
+            let dst = (y * sw + x) * 3;
+            a[dst] = original[src];
+            a[dst + 1] = original[src + 1];
+            a[dst + 2] = original[src + 2];
+        }
+    }
+    let mut b = vec![0u8; sw * sh * 3];
     for _ in 0..BLUR_PASSES {
-        box_blur_h(&a, &mut b, w, h, BLUR_RADIUS);
-        box_blur_v(&b, &mut a, w, h, BLUR_RADIUS);
+        box_blur_h(&a, &mut b, sw, sh, BLUR_RADIUS);
+        box_blur_v(&b, &mut a, sw, sh, BLUR_RADIUS);
     }
     a
 }
@@ -194,45 +217,42 @@ fn idx_clamp(val: isize, max: usize) -> usize {
 
 fn box_blur_h(src: &[u8], dst: &mut [u8], w: usize, h: usize, r: usize) {
     let diam = 2 * r + 1;
-    let stride = w * 4;
+    let stride = w * 3;
     for y in 0..h {
         let row = y * stride;
         let mut sum = [0u32; 3];
         for k in 0..diam {
             let sx = idx_clamp(k as isize - r as isize, w);
-            let idx = row + sx * 4;
+            let idx = row + sx * 3;
             sum[0] += src[idx] as u32;
             sum[1] += src[idx + 1] as u32;
             sum[2] += src[idx + 2] as u32;
         }
-        let idx = row;
-        dst[idx] = (sum[0] / diam as u32) as u8;
-        dst[idx + 1] = (sum[1] / diam as u32) as u8;
-        dst[idx + 2] = (sum[2] / diam as u32) as u8;
-        dst[idx + 3] = src[idx + 3];
+        dst[row] = (sum[0] / diam as u32) as u8;
+        dst[row + 1] = (sum[1] / diam as u32) as u8;
+        dst[row + 2] = (sum[2] / diam as u32) as u8;
 
         for x in 1..w {
             let old = idx_clamp(x as isize - 1 - r as isize, w);
-            let new = idx_clamp(x as isize + r as isize, w);
-            let old_idx = row + old * 4;
-            let new_idx = row + new * 4;
+            let new_ = idx_clamp(x as isize + r as isize, w);
+            let old_idx = row + old * 3;
+            let new_idx = row + new_ * 3;
             sum[0] = sum[0] - src[old_idx] as u32 + src[new_idx] as u32;
             sum[1] = sum[1] - src[old_idx + 1] as u32 + src[new_idx + 1] as u32;
             sum[2] = sum[2] - src[old_idx + 2] as u32 + src[new_idx + 2] as u32;
-            let idx = row + x * 4;
+            let idx = row + x * 3;
             dst[idx] = (sum[0] / diam as u32) as u8;
             dst[idx + 1] = (sum[1] / diam as u32) as u8;
             dst[idx + 2] = (sum[2] / diam as u32) as u8;
-            dst[idx + 3] = src[idx + 3];
         }
     }
 }
 
 fn box_blur_v(src: &[u8], dst: &mut [u8], w: usize, h: usize, r: usize) {
     let diam = 2 * r + 1;
-    let stride = w * 4;
+    let stride = w * 3;
     for x in 0..w {
-        let col = x * 4;
+        let col = x * 3;
         let mut sum = [0u32; 3];
         for k in 0..diam {
             let sy = idx_clamp(k as isize - r as isize, h);
@@ -244,7 +264,6 @@ fn box_blur_v(src: &[u8], dst: &mut [u8], w: usize, h: usize, r: usize) {
         dst[col] = (sum[0] / diam as u32) as u8;
         dst[col + 1] = (sum[1] / diam as u32) as u8;
         dst[col + 2] = (sum[2] / diam as u32) as u8;
-        dst[col + 3] = src[col + 3];
 
         for y in 1..h {
             let old_y = idx_clamp(y as isize - 1 - r as isize, h);
@@ -258,7 +277,6 @@ fn box_blur_v(src: &[u8], dst: &mut [u8], w: usize, h: usize, r: usize) {
             dst[idx] = (sum[0] / diam as u32) as u8;
             dst[idx + 1] = (sum[1] / diam as u32) as u8;
             dst[idx + 2] = (sum[2] / diam as u32) as u8;
-            dst[idx + 3] = src[idx + 3];
         }
     }
 }
