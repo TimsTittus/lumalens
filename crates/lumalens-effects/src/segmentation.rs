@@ -6,7 +6,8 @@
 //! consumed by [`BackgroundBlurEffect`](super::BackgroundBlurEffect).
 
 use std::any::Any;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, mpsc};
 
 use gstreamer as gst;
 use gstreamer::prelude::*;
@@ -28,8 +29,14 @@ struct InferenceHandle {
 
 /// Runs the ONNX segmentation model on camera frames and publishes
 /// the resulting foreground mask via a [`SharedMask`].
+///
+/// The GStreamer elements are kept in the pipeline unconditionally so
+/// enabling/disabling this effect never forces a pipeline rebuild.
+/// When `active` is false the pad probe stops pushing frames into the
+/// inference thread (so no model work happens) and the shared mask is
+/// cleared so downstream effects see "no mask" and pass frames through.
 pub struct SegmentationEffect {
-    enabled: bool,
+    active: Arc<AtomicBool>,
     shared_mask: Arc<SharedMask>,
     inference: Mutex<Option<InferenceHandle>>,
 }
@@ -38,7 +45,7 @@ impl SegmentationEffect {
     /// Create a new disabled segmentation effect sharing `mask`.
     pub fn new(mask: Arc<SharedMask>) -> Self {
         Self {
-            enabled: false,
+            active: Arc::new(AtomicBool::new(false)),
             shared_mask: mask,
             inference: Mutex::new(None),
         }
@@ -56,12 +63,11 @@ impl Effect for SegmentationEffect {
         Stage::Segmentation
     }
     fn is_enabled(&self) -> bool {
-        self.enabled
+        true
     }
     fn set_enabled(&mut self, v: bool) {
-        self.enabled = v;
+        self.active.store(v, Ordering::Relaxed);
         if !v {
-            self.inference.lock().unwrap().take();
             self.shared_mask.clear();
         }
     }
@@ -82,6 +88,7 @@ impl Effect for SegmentationEffect {
             _thread: thread,
         });
         drop(guard);
+        let active = self.active.clone();
 
         let convert = gst::ElementFactory::make("videoconvert")
             .build()
@@ -101,6 +108,9 @@ impl Effect for SegmentationEffect {
 
         let src_pad = identity.static_pad("src").unwrap();
         src_pad.add_probe(gst::PadProbeType::BUFFER, move |pad, info| {
+            if !active.load(Ordering::Relaxed) {
+                return gst::PadProbeReturn::Ok;
+            }
             let Some(gst::PadProbeData::Buffer(ref buffer)) = info.data else {
                 return gst::PadProbeReturn::Ok;
             };

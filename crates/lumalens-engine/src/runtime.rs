@@ -324,26 +324,17 @@ fn engine_loop(
 
             #[cfg(feature = "ai")]
             EngineCommand::EnableBackgroundBlur(enabled) => {
+                // Toggling blur used to rebuild the whole pipeline, which
+                // tore down the v4l2 virtual-camera sink and caused any
+                // consumer (e.g. a Google Meet tab) to drop the camera.
+                // The segmentation + blur elements are now always part of
+                // the pipeline; flipping their `active` atomics is a live
+                // change that doesn't disturb the sink or the stream.
                 if let Some(e) = registry.effect_mut::<SegmentationEffect>("segmentation") {
                     e.set_enabled(enabled);
                 }
                 if let Some(e) = registry.effect_mut::<BackgroundBlurEffect>("background_blur") {
                     e.set_enabled(enabled);
-                }
-                if let Some(ref pipe) = pipeline {
-                    let device = pipe.device_path().to_string();
-                    pipe.release_sink(&sink);
-                    pipeline =
-                        build_pipeline(&device, &sink, &mut registry, &cmd_tx, &event_tx);
-                    if let Some(ref pipe) = pipeline {
-                        match pipe.start() {
-                            Ok(()) => emit(&event_tx, EngineEvent::Started),
-                            Err(e) => {
-                                warn!("pipeline rebuild for background blur failed: {e}");
-                                emit(&event_tx, EngineEvent::Error(e.to_string()));
-                            }
-                        }
-                    }
                 }
             }
 

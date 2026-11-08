@@ -7,6 +7,7 @@
 
 use std::any::Any;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use gstreamer as gst;
 use gstreamer::prelude::*;
@@ -24,8 +25,14 @@ const BLUR_PASSES: usize = 2;
 
 /// Blurs the background of camera frames using the segmentation mask
 /// produced by [`SegmentationEffect`](super::SegmentationEffect).
+///
+/// The GStreamer elements are kept in the pipeline unconditionally so
+/// toggling blur at runtime never requires a pipeline rebuild (which
+/// would close the v4l2 virtual-camera sink and drop any consumer such
+/// as a running video call). The pad probe short-circuits to a plain
+/// passthrough when `active` is false.
 pub struct BackgroundBlurEffect {
-    enabled: bool,
+    active: Arc<AtomicBool>,
     shared_mask: Arc<SharedMask>,
 }
 
@@ -33,7 +40,7 @@ impl BackgroundBlurEffect {
     /// Create a new disabled background blur effect sharing `mask`.
     pub fn new(mask: Arc<SharedMask>) -> Self {
         Self {
-            enabled: false,
+            active: Arc::new(AtomicBool::new(false)),
             shared_mask: mask,
         }
     }
@@ -50,14 +57,17 @@ impl Effect for BackgroundBlurEffect {
         Stage::Composition
     }
     fn is_enabled(&self) -> bool {
-        self.enabled
+        // Always kept in the pipeline; the pad probe decides whether to
+        // actually composite based on `active`.
+        true
     }
     fn set_enabled(&mut self, v: bool) {
-        self.enabled = v;
+        self.active.store(v, Ordering::Relaxed);
     }
 
     fn build_elements(&self) -> Result<Vec<gst::Element>, EffectError> {
         let shared_mask = self.shared_mask.clone();
+        let active = self.active.clone();
 
         let convert = gst::ElementFactory::make("videoconvert")
             .build()
@@ -77,6 +87,9 @@ impl Effect for BackgroundBlurEffect {
 
         let src_pad = identity.static_pad("src").unwrap();
         src_pad.add_probe(gst::PadProbeType::BUFFER, move |pad, info| {
+            if !active.load(Ordering::Relaxed) {
+                return gst::PadProbeReturn::Ok;
+            }
             let mask_snapshot = shared_mask.get();
             if mask_snapshot.is_none() {
                 return gst::PadProbeReturn::Ok;
