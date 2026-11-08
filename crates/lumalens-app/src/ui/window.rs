@@ -541,7 +541,11 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
     let cfg = Rc::clone(&config);
     let win = window.clone();
     let save_toast = toast_overlay.clone();
+    let save_flip_dd = controls.flip_dropdown.clone();
     controls.save_preset_btn.connect_clicked(move |_| {
+        // Snapshot flip so nothing done during the dialog / preset model
+        // refresh can revert the user's current selection.
+        let saved_flip_idx = save_flip_dd.selected();
         let dialog = adw::MessageDialog::new(
             Some(&win),
             Some("Save Preset"),
@@ -563,6 +567,7 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
         let presets_inner = Rc::clone(&presets_ref);
         let dd = preset_dd.clone();
         let toast_inner = save_toast.clone();
+        let flip_dd_restore = save_flip_dd.clone();
         dialog.connect_response(None, move |dialog, response| {
             if response == "save" {
                 let name = entry.text().trim().to_string();
@@ -574,6 +579,15 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
                     Ok(()) => {
                         *presets_inner.borrow_mut() = lumalens_config::preset::list_presets();
                         refresh_preset_dropdown(&dd, &presets_inner);
+                        // Select the just-saved preset so a subsequent Apply
+                        // click re-applies these same values (including the
+                        // current flip) instead of whichever preset sorted to
+                        // position 0 after the model refresh.
+                        if let Some(idx) =
+                            presets_inner.borrow().iter().position(|p| p.name == name)
+                        {
+                            dd.set_selected(idx as u32);
+                        }
                         let t = adw::Toast::new(&format!("Preset \"{name}\" saved"));
                         t.set_timeout(3);
                         toast_inner.add_toast(t);
@@ -584,6 +598,12 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
                         t.set_timeout(5);
                         toast_inner.add_toast(t);
                     }
+                }
+                // Restore the flip dropdown to what the user had selected
+                // before Save As, in case anything in the dialog teardown
+                // emitted a spurious notify::selected that cleared it.
+                if flip_dd_restore.selected() != saved_flip_idx {
+                    flip_dd_restore.set_selected(saved_flip_idx);
                 }
             }
             dialog.close();
@@ -804,13 +824,18 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
 }
 
 /// Apply an `ImageSettings` preset to the UI controls and engine.
+///
+/// Presets intentionally do NOT change the flip / mirror / rotate
+/// setting: that reflects how the user has their camera physically
+/// mounted and shouldn't be reset just because they applied a color
+/// preset.
 #[allow(clippy::too_many_arguments)]
 fn apply_image_settings(
     image: &ImageSettings,
     brightness: &gtk::Scale,
     contrast: &gtk::Scale,
     saturation: &gtk::Scale,
-    flip_dropdown: &adw::ComboRow,
+    _flip_dropdown: &adw::ComboRow,
     engine: &Rc<RefCell<Option<lumalens_engine::runtime::Engine>>>,
     config: &Rc<RefCell<lumalens_config::Config>>,
     schedule_save: &impl Fn(),
@@ -819,15 +844,11 @@ fn apply_image_settings(
     contrast.set_value(image.contrast);
     saturation.set_value(image.saturation);
 
-    let flip_idx = FlipMethod::ALL
-        .iter()
-        .position(|&m| m == image.flip)
-        .unwrap_or(0);
-    flip_dropdown.set_selected(flip_idx as u32);
-
     {
         let mut cfg = config.borrow_mut();
-        cfg.image = image.clone();
+        cfg.image.brightness = image.brightness;
+        cfg.image.contrast = image.contrast;
+        cfg.image.saturation = image.saturation;
     }
     schedule_save();
 
@@ -835,6 +856,5 @@ fn apply_image_settings(
         e.send(EngineCommand::SetBrightness(image.brightness as f32));
         e.send(EngineCommand::SetContrast(image.contrast as f32));
         e.send(EngineCommand::SetSaturation(image.saturation as f32));
-        e.send(EngineCommand::SetFlip(image.flip));
     }
 }
