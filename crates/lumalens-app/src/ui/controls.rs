@@ -137,14 +137,10 @@ impl Controls {
         let blur_switch = gtk::Switch::builder().valign(gtk::Align::Center).build();
         #[cfg(feature = "ai")]
         let ai_group = {
-            let row = adw::ActionRow::builder()
-                .title("Background Blur")
-                .build();
+            let row = adw::ActionRow::builder().title("Background Blur").build();
             row.add_suffix(&blur_switch);
             row.set_activatable_widget(Some(&blur_switch));
-            let group = adw::PreferencesGroup::builder()
-                .title("AI Effects")
-                .build();
+            let group = adw::PreferencesGroup::builder().title("AI Effects").build();
             group.add(&row);
             group
         };

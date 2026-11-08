@@ -5,14 +5,14 @@ pub mod correction;
 pub mod transform;
 
 #[cfg(feature = "ai")]
-mod segmentation;
-#[cfg(feature = "ai")]
 mod background_blur;
+#[cfg(feature = "ai")]
+mod segmentation;
 
 #[cfg(feature = "ai")]
-pub use segmentation::SegmentationEffect;
-#[cfg(feature = "ai")]
 pub use background_blur::BackgroundBlurEffect;
+#[cfg(feature = "ai")]
+pub use segmentation::SegmentationEffect;
 
 use std::any::Any;
 use std::collections::BTreeMap;

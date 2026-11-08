@@ -188,14 +188,12 @@ fn composite_with_blur(
             let bpx = (sy * sw + sx) * 3;
             output[px] =
                 ((original[px] as u32 * alpha + blurred_small[bpx] as u32 * inv + 127) / 255) as u8;
-            output[px + 1] = ((original[px + 1] as u32 * alpha
-                + blurred_small[bpx + 1] as u32 * inv
-                + 127)
-                / 255) as u8;
-            output[px + 2] = ((original[px + 2] as u32 * alpha
-                + blurred_small[bpx + 2] as u32 * inv
-                + 127)
-                / 255) as u8;
+            output[px + 1] =
+                ((original[px + 1] as u32 * alpha + blurred_small[bpx + 1] as u32 * inv + 127)
+                    / 255) as u8;
+            output[px + 2] =
+                ((original[px + 2] as u32 * alpha + blurred_small[bpx + 2] as u32 * inv + 127)
+                    / 255) as u8;
             output[px + 3] = original[px + 3];
         }
     }

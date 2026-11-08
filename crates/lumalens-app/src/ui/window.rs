@@ -58,7 +58,8 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
             false
         }
     };
-    let (engine, event_rx) = runtime::spawn(sink, config.borrow().effects.order.clone(), blur_enabled);
+    let (engine, event_rx) =
+        runtime::spawn(sink, config.borrow().effects.order.clone(), blur_enabled);
     let engine = Rc::new(RefCell::new(Some(engine)));
 
     let controls = Controls::new();

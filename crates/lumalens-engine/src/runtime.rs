@@ -63,7 +63,14 @@ pub fn spawn(
     let handle = thread::Builder::new()
         .name("lumalens-engine".into())
         .spawn(move || {
-            engine_loop(cmd_rx, cmd_tx_clone, event_tx, sink, effect_order, _background_blur)
+            engine_loop(
+                cmd_rx,
+                cmd_tx_clone,
+                event_tx,
+                sink,
+                effect_order,
+                _background_blur,
+            )
         })
         .expect("failed to spawn engine thread");
 

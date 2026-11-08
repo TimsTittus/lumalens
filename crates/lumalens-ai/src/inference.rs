@@ -21,10 +21,7 @@ fn global_env() -> Result<&'static Environment, AiError> {
 }
 
 // Embedded at compile time by build.rs — always present, no runtime download.
-static MODEL_BYTES: &[u8] = include_bytes!(concat!(
-    env!("OUT_DIR"),
-    "/selfie-segmentation.onnx"
-));
+static MODEL_BYTES: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/selfie-segmentation.onnx"));
 
 /// A loaded ONNX segmentation model, ready for inference.
 pub struct SegmentationModel {
@@ -60,8 +57,8 @@ pub fn segment(model: &SegmentationModel, frame: &VideoFrame) -> Result<Mask, Ai
             let src_y = (y as u64 * frame.height as u64 / in_h as u64) as usize;
             let src_idx = (src_y * frame.width as usize + src_x) * 4; // RGBA
             let pixel = y as usize * in_w as usize + x as usize;
-            nchw[pixel] = frame.data[src_idx] as f32 / 255.0;                     // R plane
-            nchw[plane_size + pixel] = frame.data[src_idx + 1] as f32 / 255.0;    // G plane
+            nchw[pixel] = frame.data[src_idx] as f32 / 255.0; // R plane
+            nchw[plane_size + pixel] = frame.data[src_idx + 1] as f32 / 255.0; // G plane
             nchw[2 * plane_size + pixel] = frame.data[src_idx + 2] as f32 / 255.0; // B plane
         }
     }

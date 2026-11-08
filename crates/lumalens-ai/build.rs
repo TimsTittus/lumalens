@@ -8,7 +8,8 @@ fn main() {
     use std::path::PathBuf;
 
     const MODEL_ID: &str = "selfie-segmentation";
-    const MODEL_URL: &str = "https://huggingface.co/onnx-community/selfie_segmentation/resolve/main/onnx/model.onnx";
+    const MODEL_URL: &str =
+        "https://huggingface.co/onnx-community/selfie_segmentation/resolve/main/onnx/model.onnx";
     const MODEL_SHA256: &str = "3241ac4ad8aa35bdaf33946776db29f7c283a413aa0b0dacb9483594b4531aad";
 
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
@@ -20,8 +21,7 @@ fn main() {
 
     // If the cache is already valid, just copy to OUT_DIR and return.
     if cache_path.is_file() && verify_sha256(&cache_path, MODEL_SHA256) {
-        std::fs::copy(&cache_path, &out_path)
-            .expect("failed to copy cached model to OUT_DIR");
+        std::fs::copy(&cache_path, &out_path).expect("failed to copy cached model to OUT_DIR");
         println!("cargo:rerun-if-changed=models/{MODEL_ID}.onnx");
         return;
     }
@@ -44,8 +44,8 @@ fn main() {}
 
 #[cfg(feature = "ort")]
 fn download(url: &str) -> Vec<u8> {
-    let response = reqwest::blocking::get(url)
-        .unwrap_or_else(|e| panic!("model download failed: {e}"));
+    let response =
+        reqwest::blocking::get(url).unwrap_or_else(|e| panic!("model download failed: {e}"));
     response
         .bytes()
         .unwrap_or_else(|e| panic!("model download failed reading body: {e}"))

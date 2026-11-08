@@ -176,7 +176,10 @@ fn build_diagnostic_bundle(metrics: &Metrics) -> String {
     out.push_str(&format!("Input FPS:         {:.1}\n", metrics.input_fps));
     out.push_str(&format!("Output FPS:        {:.1}\n", metrics.output_fps));
     out.push_str(&format!("Dropped Frames:    {}\n", metrics.dropped_frames));
-    out.push_str(&format!("Processing (ms):   {:.2}\n", metrics.processing_ms));
+    out.push_str(&format!(
+        "Processing (ms):   {:.2}\n",
+        metrics.processing_ms
+    ));
     out.push_str(&format!(
         "Queue Preview:     {}\n",
         metrics.queue_depth_preview
@@ -227,7 +230,10 @@ fn build_diagnostic_bundle(metrics: &Metrics) -> String {
     out.push_str("\n--- System ---\n");
     if let Ok(release) = std::fs::read_to_string("/etc/os-release") {
         for line in release.lines() {
-            if line.starts_with("PRETTY_NAME=") || line.starts_with("NAME=") || line.starts_with("VERSION=") {
+            if line.starts_with("PRETTY_NAME=")
+                || line.starts_with("NAME=")
+                || line.starts_with("VERSION=")
+            {
                 out.push_str(line);
                 out.push('\n');
             }

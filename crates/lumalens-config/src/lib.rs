@@ -177,7 +177,9 @@ pub struct AiSettings {
 
 impl Default for AiSettings {
     fn default() -> Self {
-        Self { background_blur: true }
+        Self {
+            background_blur: true,
+        }
     }
 }
 
