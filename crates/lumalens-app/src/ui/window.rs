@@ -456,6 +456,16 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
             sched();
 
             if state {
+                if lumalens_engine::virtual_cam::find_device().is_none() {
+                    if let Err(e) = lumalens_engine::virtual_cam::ensure_module_loaded() {
+                        warn!("failed to auto-load v4l2loopback: {e}");
+                        let msg = lumalens_engine::virtual_cam::module_install_instructions();
+                        let t = adw::Toast::new(msg);
+                        t.set_timeout(5);
+                        vcam_toast.add_toast(t);
+                        return glib::Propagation::Stop;
+                    }
+                }
                 match lumalens_engine::virtual_cam::find_device() {
                     Some(_) => {
                         if let Some(ref e) = *eng.borrow() {
