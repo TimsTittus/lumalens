@@ -54,6 +54,11 @@ fn discover_via_monitor() -> Vec<CameraInfo> {
 
     for device in &devices {
         let name = device.display_name().to_string();
+
+        if name.to_ascii_lowercase().contains("lumalens") {
+            continue;
+        }
+
         let props = device.properties();
 
         let id = props
@@ -76,18 +81,29 @@ fn discover_via_monitor() -> Vec<CameraInfo> {
             continue;
         }
 
-        let device_path = props
+        let v4l2_path = props
             .as_ref()
-            .and_then(|p| p.get::<String>("api.v4l2.path").ok())
-            .or_else(|| {
-                props
-                    .as_ref()
-                    .and_then(|p| p.get::<String>("device.path").ok())
-            })
-            .unwrap_or_else(|| name.clone());
+            .and_then(|p| p.get::<String>("api.v4l2.path").ok());
+
+        let (device_path, supported_resolutions) = if let Some(ref path) = v4l2_path {
+            (path.clone(), query_supported_resolutions(path))
+        } else if let Some(serial) = props
+            .as_ref()
+            .and_then(|p| p.get::<String>("object.serial").ok())
+        {
+            let pw_path = format!("pipewire:{serial}");
+            let resolutions = resolutions_from_device_caps(device);
+            debug!("PipeWire camera: {name} (serial={serial})");
+            (pw_path, resolutions)
+        } else {
+            let fallback = props
+                .as_ref()
+                .and_then(|p| p.get::<String>("device.path").ok())
+                .unwrap_or_else(|| name.clone());
+            (fallback.clone(), query_supported_resolutions(&fallback))
+        };
 
         debug!("discovered camera: {name} (id={id}, path={device_path})");
-        let supported_resolutions = query_supported_resolutions(&device_path);
         cameras.push(CameraInfo {
             id,
             name,
@@ -97,6 +113,44 @@ fn discover_via_monitor() -> Vec<CameraInfo> {
     }
 
     cameras
+}
+
+/// Extract supported resolution presets from a GstDevice's advertised caps.
+fn resolutions_from_device_caps(device: &gst::Device) -> Vec<Resolution> {
+    let caps = device.caps();
+    let Some(caps) = caps else {
+        return vec![];
+    };
+
+    let mut seen = HashSet::new();
+    let mut resolutions = Vec::new();
+
+    for s in caps.iter() {
+        if s.name() != "video/x-raw" && s.name() != "image/jpeg" {
+            continue;
+        }
+        let width = s.get::<i32>("width").ok().map(|v| v as u32);
+        let height = s.get::<i32>("height").ok().map(|v| v as u32);
+        let fps = s.get::<gst::Fraction>("framerate").ok().map(|f| {
+            (f.numer() as u32)
+                .checked_div(f.denom() as u32)
+                .unwrap_or(0)
+        });
+
+        if let (Some(w), Some(h), Some(f)) = (width, height, fps) {
+            for preset in Resolution::PRESETS {
+                if preset.width == w
+                    && preset.height == h
+                    && preset.fps == f
+                    && seen.insert(*preset)
+                {
+                    resolutions.push(*preset);
+                }
+            }
+        }
+    }
+
+    resolutions
 }
 
 /// Query which resolution presets a V4L2 device supports by probing its caps.

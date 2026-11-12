@@ -61,11 +61,19 @@ impl Pipeline {
     ) -> Result<Self, EngineError> {
         // --- Capture stage (hard-coded) ---
 
-        let src = gst::ElementFactory::make("v4l2src")
-            .name("src")
-            .property("device", device_path)
-            .build()
-            .map_err(|e| EngineError::PipelineBuildFailed(format!("v4l2src: {e}")))?;
+        let src = if let Some(serial) = device_path.strip_prefix("pipewire:") {
+            gst::ElementFactory::make("pipewiresrc")
+                .name("src")
+                .property("target-object", serial)
+                .build()
+                .map_err(|e| EngineError::PipelineBuildFailed(format!("pipewiresrc: {e}")))?
+        } else {
+            gst::ElementFactory::make("v4l2src")
+                .name("src")
+                .property("device", device_path)
+                .build()
+                .map_err(|e| EngineError::PipelineBuildFailed(format!("v4l2src: {e}")))?
+        };
 
         let raw_caps = gst::Caps::builder("video/x-raw").build();
         let capsfilter = gst::ElementFactory::make("capsfilter")
@@ -320,10 +328,9 @@ impl Pipeline {
                 .request_pad_simple("src_%u")
                 .ok_or_else(|| EngineError::PipelineBuildFailed("tee pad request failed".into()))?;
 
-            let block_id = tee_src.add_probe(
-                gst::PadProbeType::BLOCK_DOWNSTREAM,
-                |_pad, _info| gst::PadProbeReturn::Ok,
-            );
+            let block_id = tee_src.add_probe(gst::PadProbeType::BLOCK_DOWNSTREAM, |_pad, _info| {
+                gst::PadProbeReturn::Ok
+            });
 
             tee_src
                 .link(&ghost)

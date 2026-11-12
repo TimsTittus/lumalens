@@ -160,11 +160,7 @@ fn inference_loop(frame_rx: mpsc::Receiver<FrameData>, shared_mask: Arc<SharedMa
         }
     };
 
-    loop {
-        let mut frame = match frame_rx.recv() {
-            Ok(f) => f,
-            Err(_) => break,
-        };
+    while let Ok(mut frame) = frame_rx.recv() {
         while let Ok(newer) = frame_rx.try_recv() {
             frame = newer;
         }
