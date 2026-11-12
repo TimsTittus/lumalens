@@ -312,14 +312,39 @@ impl Pipeline {
 
             self.inner.add(&bin)?;
 
+            // Request a tee pad and block it before linking so no data
+            // flows until the bin has finished its state transition.
+            // Without this, v4l2sink receives caps queries before its
+            // internal state is initialised, which crashes in the C layer.
             let tee_src = tee
                 .request_pad_simple("src_%u")
                 .ok_or_else(|| EngineError::PipelineBuildFailed("tee pad request failed".into()))?;
+
+            let block_id = tee_src.add_probe(
+                gst::PadProbeType::BLOCK_DOWNSTREAM,
+                |_pad, _info| gst::PadProbeReturn::Ok,
+            );
+
             tee_src
                 .link(&ghost)
                 .map_err(|e| EngineError::PipelineBuildFailed(format!("tee-vcam link: {e:?}")))?;
 
-            bin.sync_state_with_parent()?;
+            if bin.sync_state_with_parent().is_err() {
+                if let Some(id) = block_id {
+                    tee_src.remove_probe(id);
+                }
+                let _ = tee_src.unlink(&ghost);
+                let _ = bin.set_state(gst::State::Null);
+                let _ = self.inner.remove(&bin);
+                tee.release_request_pad(&tee_src);
+                return Err(EngineError::PipelineBuildFailed(
+                    "virtual camera failed to start".into(),
+                ));
+            }
+
+            if let Some(id) = block_id {
+                tee_src.remove_probe(id);
+            }
 
             self.vcam_bin = Some(bin);
             self.vcam_tee_pad = Some(tee_src);

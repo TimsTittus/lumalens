@@ -305,6 +305,8 @@ fn engine_loop(
                                 if let Err(e) = pipe.enable_virtual_camera(true, &device) {
                                     warn!("failed to enable virtual camera: {e}");
                                     emit(&event_tx, EngineEvent::Error(e.to_string()));
+                                } else {
+                                    crate::virtual_cam::notify_pipewire();
                                 }
                             }
                             None => {

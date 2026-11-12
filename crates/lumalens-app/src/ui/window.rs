@@ -453,9 +453,6 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
     controls
         .virtual_cam_switch
         .connect_state_set(move |_switch, state| {
-            cfg.borrow_mut().virtual_camera.enabled = state;
-            sched();
-
             if state {
                 if lumalens_engine::virtual_cam::find_device().is_none() {
                     if let Err(e) = lumalens_engine::virtual_cam::ensure_module_loaded() {
@@ -472,6 +469,8 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
                         if let Some(ref e) = *eng.borrow() {
                             e.send(EngineCommand::EnableVirtualCamera(true));
                         }
+                        cfg.borrow_mut().virtual_camera.enabled = true;
+                        sched();
                         glib::Propagation::Proceed
                     }
                     None => {
@@ -487,6 +486,8 @@ pub fn new(app: &adw::Application) -> adw::ApplicationWindow {
                 if let Some(ref e) = *eng.borrow() {
                     e.send(EngineCommand::EnableVirtualCamera(false));
                 }
+                cfg.borrow_mut().virtual_camera.enabled = false;
+                sched();
                 glib::Propagation::Proceed
             }
         });

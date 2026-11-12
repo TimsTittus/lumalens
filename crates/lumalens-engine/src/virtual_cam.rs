@@ -12,7 +12,7 @@ pub fn find_device() -> Option<String> {
     for entry in entries.flatten() {
         let name_path = entry.path().join("name");
         if let Ok(name) = fs::read_to_string(&name_path) {
-            if name.to_ascii_lowercase().contains("lumalens") {
+            if name.trim().to_ascii_lowercase().contains("lumalens") {
                 let dev_name = entry.file_name();
                 return Some(format!("/dev/{}", dev_name.to_string_lossy()));
             }
@@ -33,7 +33,7 @@ pub fn is_module_loaded() -> bool {
 /// module is loaded by the time this returns (either it already was, or
 /// we just loaded it).
 pub fn ensure_module_loaded() -> Result<(), String> {
-    if is_module_loaded() {
+    if is_module_loaded() && find_device().is_some() {
         return Ok(());
     }
 
@@ -50,12 +50,21 @@ set -e
 printf 'v4l2loopback\n' > /etc/modules-load.d/v4l2loopback.conf
 printf 'options v4l2loopback exclusive_caps=1 card_label="LumaLens" video_nr=10\n' \
     > /etc/modprobe.d/zz-lumalens-v4l2loopback.conf
+# udev rule: override device.capabilities so PipeWire/WirePlumber
+# recognise the loopback device as a camera even before a producer
+# writes to it (exclusive_caps advertises Output until then).
+printf 'KERNEL=="video[0-9]*", ATTR{name}=="LumaLens", ENV{ID_V4L_CAPABILITIES}=":capture:"\n' \
+    > /etc/udev/rules.d/99-lumalens-v4l2loopback.rules
+udevadm control --reload-rules
 # Remove the old filename if a previous build created it; harmless if absent.
 rm -f /etc/modprobe.d/lumalens-v4l2loopback.conf
 # Reload so the new options take effect now even if the module was
 # previously loaded with different options (e.g. a different card_label).
 modprobe -r v4l2loopback 2>/dev/null || true
 modprobe v4l2loopback
+# Trigger udev so the new rule takes effect for the freshly loaded device.
+sleep 0.5
+udevadm trigger --action=change --subsystem-match=video4linux
 "#;
 
     let status = Command::new("pkexec")
@@ -80,6 +89,20 @@ modprobe v4l2loopback
     } else {
         Err("module did not appear after modprobe".to_string())
     }
+}
+
+/// Re-enumerate the v4l2loopback device in PipeWire/WirePlumber.
+///
+/// With `exclusive_caps=1` the device advertises only "Video Output"
+/// until a producer is writing frames, then switches to "Video Capture".
+/// The udev rule installed by [`ensure_module_loaded`] sets the correct
+/// capabilities, but WirePlumber may have cached stale values from
+/// before the rule existed or before the producer started.  A restart
+/// picks up the current udev database.
+pub fn notify_pipewire() {
+    let _ = Command::new("systemctl")
+        .args(["--user", "restart", "wireplumber"])
+        .spawn();
 }
 
 /// User-facing instructions for installing the v4l2loopback module.
