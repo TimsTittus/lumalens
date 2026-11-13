@@ -19,11 +19,21 @@ GStreamer.
 - **Resolution switching** — change capture resolution at runtime from
   camera-supported presets (640×480, 720p, 1080p).
 - **Virtual camera output** — feed your adjusted video to any app via
-  v4l2loopback.
+  v4l2loopback. The module is auto-loaded when you enable virtual
+  camera output.
+- **PipeWire camera support** — automatic `pipewiresrc` fallback for
+  cameras exposed through PipeWire (e.g. libcamera devices).
 - **Multi-camera support** — switch between connected cameras from a
   dropdown.
 - **Image presets** — save, load, and delete named profiles. Three
   built-in presets (Natural, Warm, Cool) are included.
+- **Effect pipeline** — fixed-stage effect chain with drag-and-drop
+  reordering.
+- **AI background blur** (optional) — ONNX-based person segmentation
+  with real-time background blur, running on a downsampled copy for
+  performance. Requires the `ai` feature flag at build time.
+- **Diagnostics** — live pipeline metrics panel and one-click diagnostic
+  bundle export for troubleshooting.
 - **Config persistence** — settings are saved automatically and restored
   on next launch.
 - **Hot-plug detection** — cameras are discovered automatically when
@@ -96,6 +106,15 @@ sudo dnf install \
 cargo run
 ```
 
+To enable AI background blur (optional), build with the `ai` feature:
+
+```bash
+cargo run --features ai
+```
+
+This pulls in the ONNX Runtime and downloads the segmentation model on
+first build.
+
 ### Virtual camera (optional)
 
 To use the virtual camera output, load the `v4l2loopback` kernel module:
@@ -116,17 +135,33 @@ To persist across reboots, see the
   access. Use the native package for virtual camera output.
 - **Wayland tested on GNOME and KDE only.** X11 works via XWayland but
   is not the primary test target.
-- **No AI effects yet.** Background blur and segmentation are planned
-  but not in this release.
+- **AI effects require the `ai` feature flag.** Background blur is
+  available but requires ONNX Runtime and a compatible CPU/GPU.
 - **No audio handling.** LumaLens is video-only.
+
+## Architecture
+
+LumaLens is a Cargo workspace with six crates:
+
+| Crate | Purpose |
+|---|---|
+| `lumalens-app` | GTK4/Libadwaita UI |
+| `lumalens-engine` | GStreamer pipeline, camera, virtual cam |
+| `lumalens-effects` | Fixed-stage effect chain and built-in effects |
+| `lumalens-ai` | ONNX segmentation (optional `ai` feature) |
+| `lumalens-config` | Settings persistence |
+| `lumalens-common` | Shared types and utilities |
+
+See [ADR 0002](docs/decisions/0002-four-crate-workspace.md) for the
+workspace design rationale.
 
 ## Roadmap
 
 See the [issue tracker](../../issues) for planned work. Key areas:
 
-- Fixed-stage effect engine
-- Optional AI background effects (blur, replace)
+- Additional AI effects (background replace, style transfer)
 - Flatpak on Flathub (manifest ready, pending submission)
+- More effect stages and user-authored effects
 
 ## Contributing
 
